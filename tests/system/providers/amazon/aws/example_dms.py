@@ -20,8 +20,8 @@ Note:  DMS requires you to configure specific IAM roles/permissions.  For more i
 https://docs.aws.amazon.com/dms/latest/userguide/CHAP_Security.html#CHAP_Security.APIRole
 """
 
+
 import json
-import os
 from datetime import datetime
 
 import boto3
@@ -31,6 +31,7 @@ from airflow import DAG
 from airflow.decorators import task
 from airflow.models.baseoperator import chain
 from airflow.operators.python import get_current_context
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.amazon.aws.operators.dms import (
     DmsCreateTaskOperator,
     DmsDeleteTaskOperator,
@@ -39,14 +40,18 @@ from airflow.providers.amazon.aws.operators.dms import (
     DmsStopTaskOperator,
 )
 from airflow.providers.amazon.aws.sensors.dms import DmsTaskBaseSensor, DmsTaskCompletedSensor
+from tests.system.providers.amazon.aws.utils import fetch_variable, set_env_id
 
-S3_BUCKET = os.getenv('S3_BUCKET', 's3_bucket_name')
-ROLE_ARN = os.getenv('ROLE_ARN', 'arn:aws:iam::1234567890:role/s3_target_endpoint_role')
+ENV_ID = set_env_id()
+DAG_ID = 'example_dms'
+
+S3_BUCKET = f'{ENV_ID}-dms-bucket'
+ROLE_ARN = fetch_variable('ROLE_ARN')
 
 # The project name will be used as a prefix for various entity names.
 # Use either PascalCase or camelCase.  While some names require kebab-case
 # and others require snake_case, they all accept mixedCase strings.
-PROJECT_NAME = 'DmsDemo'
+PROJECT_NAME = f'{ENV_ID}DmsDemo'
 
 # Config values for setting up the "Source" database.
 RDS_ENGINE = 'postgres'
@@ -178,6 +183,10 @@ def _create_dms_endpoints(ti, dms_client, rds_instance_endpoint):
         DatabaseName=RDS_DB_NAME,
     )['Endpoint']['EndpointArn']
 
+    print('Creating S3 bucket for target endpoint')
+    s3_hook = S3Hook()
+    s3_hook.create_bucket(bucket_name=S3_BUCKET)
+
     print('Creating DMS target endpoint.')
     target_endpoint_arn = dms_client.create_endpoint(
         EndpointIdentifier=TARGET_ENDPOINT_IDENTIFIER,
@@ -224,6 +233,8 @@ def _delete_dms_assets(dms_client):
     dms_client.delete_replication_instance(ReplicationInstanceArn=replication_instance_arn)
     dms_client.delete_endpoint(EndpointArn=source_arn)
     dms_client.delete_endpoint(EndpointArn=target_arn)
+    s3_hook = S3Hook()
+    s3_hook.delete_bucket(bucket_name=S3_BUCKET, force_delete=True)
 
 
 def _await_all_teardowns(dms_client):
@@ -264,8 +275,8 @@ def clean_up():
 
 
 with DAG(
-    dag_id='example_dms',
-    schedule_interval=None,
+    dag_id=DAG_ID,
+    schedule_interval='@once',
     start_date=datetime(2021, 1, 1),
     tags=['example'],
     catchup=False,
@@ -306,6 +317,7 @@ with DAG(
 
     await_task_start = DmsTaskBaseSensor(
         task_id='await_task_start',
+        poke_interval=500,  # The task can start and finish quickly within our dummy example
         replication_task_arn=create_task.output,
         target_statuses=['running'],
         termination_statuses=['stopped', 'deleting', 'failed'],
@@ -335,13 +347,28 @@ with DAG(
     # [END howto_operator_dms_delete_task]
 
     chain(
-        set_up()
-        >> create_task
-        >> start_task
-        >> describe_tasks
-        >> await_task_start
-        >> stop_task
-        >> await_task_stop
-        >> delete_task
-        >> clean_up()
+        # TEST SETUP
+        set_up(),
+        # TEST BODY
+        create_task,
+        start_task,
+        describe_tasks,
+        await_task_start,
+        stop_task,
+        await_task_stop,
+        delete_task,
+        # TEST TEARDOWN
+        clean_up(),
     )
+
+    from tests.system.utils.watcher import watcher
+
+    # This test needs watcher in order to properly mark success/failure
+    # when "tearDown" task with trigger rule is part of the DAG
+    list(dag.tasks) >> watcher()
+
+
+from tests.system.utils import get_test_run  # noqa: E402
+
+# Needed to run the example DAG with pytest (see: tests/system/README.md#run_via_pytest)
+test_run = get_test_run(dag)
