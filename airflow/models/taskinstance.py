@@ -524,6 +524,7 @@ def _refresh_from_db(
         task_instance.job_id = ti.job_id
         task_instance.pool = ti.pool
         task_instance.pool_slots = ti.pool_slots or 1
+        task_instance.executor = ti.executor
         task_instance.queue = ti.queue
         task_instance.priority_weight = ti.priority_weight
         task_instance.operator = ti.operator
@@ -923,6 +924,7 @@ def _refresh_from_task(
     :meta private:
     """
     task_instance.task = task
+    task_instance.executor = task.executor
     task_instance.queue = task.queue
     task_instance.pool = pool_override or task.pool
     task_instance.pool_slots = task.pool_slots
@@ -1271,6 +1273,7 @@ class TaskInstance(Base, LoggingMixin):
     job_id = Column(Integer)
     pool = Column(String(256), nullable=False)
     pool_slots = Column(Integer, default=1, nullable=False)
+    executor = Column(String(256))
     queue = Column(String(256))
     priority_weight = Column(Integer)
     operator = Column(String(1000))
@@ -1456,6 +1459,7 @@ class TaskInstance(Base, LoggingMixin):
             "_try_number": 0,
             "hostname": "",
             "unixname": getuser(),
+            "executor": task.executor,
             "queue": task.queue,
             "pool": task.pool,
             "pool_slots": task.pool_slots,
@@ -3644,6 +3648,7 @@ class SimpleTaskInstance:
         state: str,
         executor_config: Any,
         pool: str,
+        executor: str | None,
         queue: str,
         key: TaskInstanceKey,
         run_as_user: str | None = None,
@@ -3661,6 +3666,7 @@ class SimpleTaskInstance:
         self.run_as_user = run_as_user
         self.pool = pool
         self.priority_weight = priority_weight
+        self.executor = executor
         self.queue = queue
         self.key = key
 
@@ -3697,6 +3703,7 @@ class SimpleTaskInstance:
             state=ti.state,
             executor_config=ti.executor_config,
             pool=ti.pool,
+            executor=ti.executor,
             queue=ti.queue,
             key=ti.key,
             run_as_user=ti.run_as_user if hasattr(ti, "run_as_user") else None,

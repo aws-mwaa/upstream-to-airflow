@@ -28,6 +28,7 @@ import attr
 from airflow.compat.functools import cache
 from airflow.exceptions import AirflowException, UnmappableOperator
 from airflow.models.abstractoperator import (
+    DEFAULT_EXECUTOR,
     DEFAULT_IGNORE_FIRST_DEPENDS_ON_PAST,
     DEFAULT_OWNER,
     DEFAULT_POOL_SLOTS,
@@ -469,6 +470,10 @@ class MappedOperator(AbstractOperator):
     @retries.setter
     def retries(self, value: int) -> None:
         self.partial_kwargs["retries"] = value
+
+    @property
+    def executor(self) -> str:
+        return self.partial_kwargs.get("executor", DEFAULT_EXECUTOR)
 
     @property
     def queue(self) -> str:

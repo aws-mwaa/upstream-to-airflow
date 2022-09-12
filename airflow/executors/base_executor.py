@@ -170,6 +170,10 @@ class BaseExecutor(LoggingMixin):
 
         pool = pool or task_instance.pool
 
+        # TODO: why did I put this change here? This seems like AIP-51 not AIP-61
+        if not self.supports_pickling:
+            pickle_id = None
+
         command_list_to_run = task_instance.command_as_list(
             local=True,
             mark_success=mark_success,

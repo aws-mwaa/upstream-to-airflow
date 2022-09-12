@@ -62,6 +62,7 @@ from airflow.exceptions import (
 )
 from airflow.lineage import apply_lineage, prepare_lineage
 from airflow.models.abstractoperator import (
+    DEFAULT_EXECUTOR,
     DEFAULT_IGNORE_FIRST_DEPENDS_ON_PAST,
     DEFAULT_OWNER,
     DEFAULT_POOL_SLOTS,
@@ -206,6 +207,7 @@ _PARTIAL_DEFAULTS: dict[str, Any] = {
     "wait_for_past_depends_before_skipping": DEFAULT_WAIT_FOR_PAST_DEPENDS_BEFORE_SKIPPING,
     "wait_for_downstream": False,
     "retries": DEFAULT_RETRIES,
+    "executor": DEFAULT_EXECUTOR,
     "queue": DEFAULT_QUEUE,
     "pool_slots": DEFAULT_POOL_SLOTS,
     "execution_timeout": DEFAULT_TASK_EXECUTION_TIMEOUT,
@@ -237,6 +239,7 @@ def partial(
     wait_for_past_depends_before_skipping: bool | ArgNotSet = NOTSET,
     wait_for_downstream: bool | ArgNotSet = NOTSET,
     retries: int | None | ArgNotSet = NOTSET,
+    executor: str | None = None,
     queue: str | ArgNotSet = NOTSET,
     pool: str | ArgNotSet = NOTSET,
     pool_slots: int | ArgNotSet = NOTSET,
@@ -303,6 +306,7 @@ def partial(
         "wait_for_past_depends_before_skipping": wait_for_past_depends_before_skipping,
         "wait_for_downstream": wait_for_downstream,
         "retries": retries,
+        "executor": executor,
         "queue": queue,
         "pool": pool,
         "pool_slots": pool_slots,
@@ -583,6 +587,7 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         in a plugin, then providing the class path or the class instance via
         ``weight_rule`` parameter. The custom priority weight strategy will be
         used to calculate the effective total priority weight of the task instance.
+    :param executor: which executor to target when running this task.
     :param queue: which queue to target when running this job. Not
         all executors implement queue management, the CeleryExecutor
         does support targeting specific queues.
@@ -719,6 +724,8 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         "wait_for_downstream",
         "priority_weight",
         "sla",
+        # TODO: should executor go here? I think so
+        "executor",
         "execution_timeout",
         "on_execute_callback",
         "on_failure_callback",
@@ -776,6 +783,7 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         default_args: dict | None = None,
         priority_weight: int = DEFAULT_PRIORITY_WEIGHT,
         weight_rule: str | PriorityWeightStrategy = DEFAULT_WEIGHT_RULE,
+        executor: str | None = None,
         queue: str = DEFAULT_QUEUE,
         pool: str | None = None,
         pool_slots: int = DEFAULT_POOL_SLOTS,
@@ -869,6 +877,7 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         self.executor_config = executor_config or {}
         self.run_as_user = run_as_user
         self.retries = parse_retries(retries)
+        self.executor = executor
         self.queue = queue
         self.pool = Pool.DEFAULT_POOL_NAME if pool is None else pool
         self.pool_slots = pool_slots

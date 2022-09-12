@@ -92,6 +92,7 @@ class TaskInstancePydantic(BaseModelPydantic, LoggingMixin):
     job_id: Optional[int]
     pool: str
     pool_slots: int
+    executor: Optional[str]
     queue: str
     priority_weight: Optional[int]
     operator: str
