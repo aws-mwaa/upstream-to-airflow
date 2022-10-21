@@ -286,7 +286,10 @@ def purge_logs(
             if force_delete or not client.describe_log_streams(logGroupName=group)['logStreams']:
                 client.delete_log_group(logGroupName=group)
         except ClientError as e:
-            if not retry or retry_times == 0 or e.response['Error']['Code'] != 'ResourceNotFoundException':
+            error_is_ResourceNotFoundException = e.response['Error']['Code'] == 'ResourceNotFoundException'
+            if error_is_ResourceNotFoundException:
+                print(f'ResourceNotFoundException raised while attempting to delete log group {group}')
+            elif not error_is_ResourceNotFoundException or not retry or retry_times == 0:
                 raise e
 
             sleep(PURGE_LOGS_INTERVAL_PERIOD)

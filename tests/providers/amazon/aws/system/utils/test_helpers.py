@@ -143,3 +143,16 @@ class TestAmazonSystemTestHelpers:
         env_id = set_env_id()
 
         assert os.environ[ENV_ID_ENVIRON_KEY] == env_id
+
+    # @mock_logs
+    # @patch.object(boto3.client('logs'), 'describe_log_streams')
+    # def test_purge_logs_happy(self, mock_log_streams):
+    #     mock_log_streams.return_value = {'logStreams': [{'logStreamName': 'stream'}]}
+    #
+    #     purge_logs(test_logs=[('group', 'stream')])
+
+    def test_purge_logs_group_not_found(self):
+        ...
+
+    def test_purge_logs_exception(self):
+        ...
