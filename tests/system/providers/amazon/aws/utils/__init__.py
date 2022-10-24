@@ -20,6 +20,7 @@ import inspect
 import json
 import logging
 import os
+import warnings
 from os.path import basename, splitext
 from time import sleep
 from uuid import uuid4
@@ -281,11 +282,18 @@ def purge_logs(
                 )['logStreams']
 
                 for stream_name in [stream['logStreamName'] for stream in log_streams]:
-                    client.delete_log_stream(logGroupName=group, logStreamName=stream_name)
+                    cmd = f"boto3.client('logs').delete_log_stream(logGroupName={group}, logStreamName={stream_name})"
+                    warnings.warn(f'deleting stream {stream_name} in group {group} using command: `{cmd}`')
+                    result = client.delete_log_stream(logGroupName=group, logStreamName=stream_name)
+                    warnings.warn(f'result of deleting stream {stream_name}:  {result}')
 
             if force_delete or not client.describe_log_streams(logGroupName=group)['logStreams']:
-                client.delete_log_group(logGroupName=group)
+                cmd = f"boto3.client('logs').delete_log_group(logGroupName={group})"
+                warnings.warn(f'no streams left in group {group}, deleting group using command: `{cmd}`.')
+                result = client.delete_log_group(logGroupName=group)
+                warnings.warn(f'result of deleting group {group}: {result}')
         except ClientError as e:
+            warnings.warn(f'failed to delete stream.  error: {e}')
             if not retry or retry_times == 0 or e.response['Error']['Code'] != 'ResourceNotFoundException':
                 raise e
 
