@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import json
-import unittest
 from typing import Any
 from unittest import mock
 
@@ -68,92 +67,88 @@ MOCK_STOP_RESPONSE: dict[str, Any] = {"ReplicationTask": {**MOCK_TASK_RESPONSE_D
 MOCK_DELETE_RESPONSE: dict[str, Any] = {"ReplicationTask": {**MOCK_TASK_RESPONSE_DATA, "Status": "deleting"}}
 
 
-class TestDmsHook(unittest.TestCase):
-    def setUp(self):
-        self.dms = DmsHook()
+@pytest.fixture
+def mock_conn():
+    with mock.patch.object(DmsHook, "get_conn") as _get_conn:
+        yield _get_conn.return_value
 
+
+class TestDmsHook:
     def test_init(self):
-        assert self.dms.aws_conn_id == "aws_default"
+        hook = DmsHook()
 
-    @mock.patch.object(DmsHook, "get_conn")
+        assert hook.aws_conn_id == "aws_default"
+
     def test_describe_replication_tasks_with_no_tasks_found(self, mock_conn):
-        mock_conn.return_value.describe_replication_tasks.return_value = {}
+        mock_conn.describe_replication_tasks.return_value = {}
 
-        marker, tasks = self.dms.describe_replication_tasks()
+        marker, tasks = DmsHook().describe_replication_tasks()
 
-        mock_conn.return_value.describe_replication_tasks.assert_called_once()
+        mock_conn.describe_replication_tasks.assert_called_once()
         assert marker is None
         assert len(tasks) == 0
 
-    @mock.patch.object(DmsHook, "get_conn")
     def test_describe_replication_tasks(self, mock_conn):
-        mock_conn.return_value.describe_replication_tasks.return_value = MOCK_DESCRIBE_RESPONSE
+        mock_conn.describe_replication_tasks.return_value = MOCK_DESCRIBE_RESPONSE
         describe_tasks_kwargs = {
             "Filters": [{"Name": "replication-task-id", "Values": [MOCK_DATA["replication_task_id"]]}]
         }
 
-        marker, tasks = self.dms.describe_replication_tasks(**describe_tasks_kwargs)
+        marker, tasks = DmsHook().describe_replication_tasks(**describe_tasks_kwargs)
 
-        mock_conn.return_value.describe_replication_tasks.assert_called_with(**describe_tasks_kwargs)
+        mock_conn.describe_replication_tasks.assert_called_with(**describe_tasks_kwargs)
         assert marker is None
         assert len(tasks) == 1
         assert tasks[0]["ReplicationTaskArn"] == MOCK_TASK_ARN
 
-    @mock.patch.object(DmsHook, "get_conn")
-    def test_describe_teplication_tasks_with_marker(self, mock_conn):
-        mock_conn.return_value.describe_replication_tasks.return_value = MOCK_DESCRIBE_RESPONSE_WITH_MARKER
+    def test_describe_replication_tasks_with_marker(self, mock_conn):
+        mock_conn.describe_replication_tasks.return_value = MOCK_DESCRIBE_RESPONSE_WITH_MARKER
         describe_tasks_kwargs = {
             "Filters": [{"Name": "replication-task-id", "Values": [MOCK_DATA["replication_task_id"]]}]
         }
 
-        marker, tasks = self.dms.describe_replication_tasks(**describe_tasks_kwargs)
+        marker, tasks = DmsHook().describe_replication_tasks(**describe_tasks_kwargs)
 
-        mock_conn.return_value.describe_replication_tasks.assert_called_with(**describe_tasks_kwargs)
+        mock_conn.describe_replication_tasks.assert_called_with(**describe_tasks_kwargs)
         assert marker == MOCK_DESCRIBE_RESPONSE_WITH_MARKER["Marker"]
         assert len(tasks) == 1
         assert tasks[0]["ReplicationTaskArn"] == MOCK_TASK_ARN
 
-    @mock.patch.object(DmsHook, "get_conn")
     def test_find_replication_tasks_by_arn(self, mock_conn):
-        mock_conn.return_value.describe_replication_tasks.return_value = MOCK_DESCRIBE_RESPONSE
-
-        tasks = self.dms.find_replication_tasks_by_arn(MOCK_TASK_ARN)
-
+        mock_conn.describe_replication_tasks.return_value = MOCK_DESCRIBE_RESPONSE
         expected_call_params = {
             "Filters": [{"Name": "replication-task-arn", "Values": [MOCK_TASK_ARN]}],
             "WithoutSettings": False,
         }
 
-        mock_conn.return_value.describe_replication_tasks.assert_called_with(**expected_call_params)
+        tasks = DmsHook().find_replication_tasks_by_arn(MOCK_TASK_ARN)
+
+        mock_conn.describe_replication_tasks.assert_called_with(**expected_call_params)
         assert len(tasks) == 1
         assert tasks[0]["ReplicationTaskArn"] == MOCK_TASK_ARN
 
-    @mock.patch.object(DmsHook, "get_conn")
     def test_get_task_status(self, mock_conn):
-        mock_conn.return_value.describe_replication_tasks.return_value = MOCK_DESCRIBE_RESPONSE
-
-        status = self.dms.get_task_status(MOCK_TASK_ARN)
-
+        mock_conn.describe_replication_tasks.return_value = MOCK_DESCRIBE_RESPONSE
         expected_call_params = {
             "Filters": [{"Name": "replication-task-arn", "Values": [MOCK_TASK_ARN]}],
             "WithoutSettings": True,
         }
 
-        mock_conn.return_value.describe_replication_tasks.assert_called_with(**expected_call_params)
+        status = DmsHook().get_task_status(MOCK_TASK_ARN)
+
+        mock_conn.describe_replication_tasks.assert_called_with(**expected_call_params)
         assert status == MOCK_TASK_RESPONSE_DATA["Status"]
 
-    @mock.patch.object(DmsHook, "get_conn")
     def test_get_task_status_with_no_task_found(self, mock_conn):
-        mock_conn.return_value.describe_replication_tasks.return_value = {}
-        status = self.dms.get_task_status(MOCK_TASK_ARN)
+        mock_conn.describe_replication_tasks.return_value = {}
 
-        mock_conn.return_value.describe_replication_tasks.assert_called_once()
+        status = DmsHook().get_task_status(MOCK_TASK_ARN)
+
+        mock_conn.describe_replication_tasks.assert_called_once()
         assert status is None
 
-    @mock.patch.object(DmsHook, "get_conn")
     def test_create_replication_task(self, mock_conn):
-        mock_conn.return_value.create_replication_task.return_value = MOCK_CREATE_RESPONSE
-        result = self.dms.create_replication_task(**MOCK_DATA)
+        mock_conn.create_replication_task.return_value = MOCK_CREATE_RESPONSE
         expected_call_params = {
             "ReplicationTaskIdentifier": MOCK_DATA["replication_task_id"],
             "SourceEndpointArn": MOCK_DATA["source_endpoint_arn"],
@@ -162,55 +157,54 @@ class TestDmsHook(unittest.TestCase):
             "MigrationType": MOCK_DATA["migration_type"],
             "TableMappings": json.dumps(MOCK_DATA["table_mappings"]),
         }
-        mock_conn.return_value.create_replication_task.assert_called_with(**expected_call_params)
+
+        result = DmsHook().create_replication_task(**MOCK_DATA)
+
+        mock_conn.create_replication_task.assert_called_with(**expected_call_params)
         assert result == MOCK_CREATE_RESPONSE["ReplicationTask"]["ReplicationTaskArn"]
 
-    @mock.patch.object(DmsHook, "get_conn")
     def test_start_replication_task(self, mock_conn):
-        mock_conn.return_value.start_replication_task.return_value = MOCK_START_RESPONSE
+        mock_conn.start_replication_task.return_value = MOCK_START_RESPONSE
         start_type = "start-replication"
-
-        self.dms.start_replication_task(
-            replication_task_arn=MOCK_TASK_ARN,
-            start_replication_task_type=start_type,
-        )
-
         expected_call_params = {
             "ReplicationTaskArn": MOCK_TASK_ARN,
             "StartReplicationTaskType": start_type,
         }
-        mock_conn.return_value.start_replication_task.assert_called_with(**expected_call_params)
 
-    @mock.patch.object(DmsHook, "get_conn")
+        DmsHook().start_replication_task(
+            replication_task_arn=MOCK_TASK_ARN,
+            start_replication_task_type=start_type,
+        )
+
+        mock_conn.start_replication_task.assert_called_with(**expected_call_params)
+
     def test_stop_replication_task(self, mock_conn):
         mock_conn.return_value.stop_replication_task.return_value = MOCK_STOP_RESPONSE
-
-        self.dms.stop_replication_task(replication_task_arn=MOCK_TASK_ARN)
-
         expected_call_params = {"ReplicationTaskArn": MOCK_TASK_ARN}
-        mock_conn.return_value.stop_replication_task.assert_called_with(**expected_call_params)
 
-    @mock.patch.object(DmsHook, "get_conn")
+        DmsHook().stop_replication_task(replication_task_arn=MOCK_TASK_ARN)
+
+        mock_conn.stop_replication_task.assert_called_with(**expected_call_params)
+
     def test_delete_replication_task(self, mock_conn):
-        mock_conn.return_value.delete_replication_task.return_value = MOCK_DELETE_RESPONSE
-
-        self.dms.delete_replication_task(replication_task_arn=MOCK_TASK_ARN)
-
+        mock_conn.delete_replication_task.return_value = MOCK_DELETE_RESPONSE
         expected_call_params = {"ReplicationTaskArn": MOCK_TASK_ARN}
-        mock_conn.return_value.delete_replication_task.assert_called_with(**expected_call_params)
 
-    @mock.patch.object(DmsHook, "get_conn")
-    def test_wait_for_task_status_with_unknown_target_status(self, mock_conn):
+        DmsHook().delete_replication_task(replication_task_arn=MOCK_TASK_ARN)
+
+        mock_conn.delete_replication_task.assert_called_with(**expected_call_params)
+
+    def test_wait_for_task_status_with_unknown_target_status(self):
         with pytest.raises(TypeError, match="Status must be an instance of DmsTaskWaiterStatus"):
-            self.dms.wait_for_task_status(MOCK_TASK_ARN, "unknown_status")
+            DmsHook().wait_for_task_status(MOCK_TASK_ARN, "unknown_status")
 
-    @mock.patch.object(DmsHook, "get_conn")
     def test_wait_for_task_status(self, mock_conn):
-        self.dms.wait_for_task_status(replication_task_arn=MOCK_TASK_ARN, status=DmsTaskWaiterStatus.DELETED)
-
         expected_waiter_call_params = {
             "Filters": [{"Name": "replication-task-arn", "Values": [MOCK_TASK_ARN]}],
             "WithoutSettings": True,
         }
-        mock_conn.return_value.get_waiter.assert_called_with("replication_task_deleted")
-        mock_conn.return_value.get_waiter.return_value.wait.assert_called_with(**expected_waiter_call_params)
+
+        DmsHook().wait_for_task_status(replication_task_arn=MOCK_TASK_ARN, status=DmsTaskWaiterStatus.DELETED)
+
+        mock_conn.get_waiter.assert_called_with("replication_task_deleted")
+        mock_conn.get_waiter.return_value.wait.assert_called_with(**expected_waiter_call_params)

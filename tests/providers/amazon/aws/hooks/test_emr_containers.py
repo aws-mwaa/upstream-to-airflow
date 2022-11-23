@@ -17,8 +17,9 @@
 # under the License.
 from __future__ import annotations
 
-import unittest
 from unittest import mock
+
+import pytest
 
 from airflow.providers.amazon.aws.hooks.emr import EmrContainerHook
 
@@ -46,71 +47,66 @@ JOB2_RUN_DESCRIPTION = {
     }
 }
 
+VIRTUAL_CLUSTER_ID = "vc1234"
 
-class TestEmrContainerHook(unittest.TestCase):
-    def setUp(self):
-        self.emr_containers = EmrContainerHook(virtual_cluster_id="vc1234")
 
-    def test_init(self):
-        assert self.emr_containers.aws_conn_id == "aws_default"
-        assert self.emr_containers.virtual_cluster_id == "vc1234"
+@pytest.fixture
+def mock_conn():
+    with mock.patch.object(EmrContainerHook, "get_conn") as _get_conn:
+        yield _get_conn.return_value
 
-    @mock.patch("boto3.session.Session")
-    def test_create_emr_on_eks_cluster(self, mock_session):
-        emr_client_mock = mock.MagicMock()
-        emr_client_mock.create_virtual_cluster.return_value = CREATE_EMR_ON_EKS_CLUSTER_RETURN
-        emr_session_mock = mock.MagicMock()
-        emr_session_mock.client.return_value = emr_client_mock
-        mock_session.return_value = emr_session_mock
 
-        emr_on_eks_create_cluster_response = self.emr_containers.create_emr_on_eks_cluster(
+@pytest.fixture
+def provide_hook():
+    return EmrContainerHook(virtual_cluster_id=VIRTUAL_CLUSTER_ID)
+
+
+class TestEmrContainerHook:
+    def test_init(self, provide_hook):
+        hook = provide_hook
+
+        assert hook.aws_conn_id == "aws_default"
+        assert hook.virtual_cluster_id == "vc1234"
+
+    def test_create_emr_on_eks_cluster(self, mock_conn, provide_hook):
+        mock_conn.create_virtual_cluster.return_value = CREATE_EMR_ON_EKS_CLUSTER_RETURN
+
+        emr_on_eks_create_cluster_response = provide_hook.create_emr_on_eks_cluster(
             virtual_cluster_name="test_virtual_cluster",
             eks_cluster_name="test_eks_cluster",
             eks_namespace="test_eks_namespace",
         )
+
         assert emr_on_eks_create_cluster_response == "vc1234"
 
-    @mock.patch("boto3.session.Session")
-    def test_submit_job(self, mock_session):
-        # Mock out the emr_client creator
-        emr_client_mock = mock.MagicMock()
-        emr_client_mock.start_job_run.return_value = SUBMIT_JOB_SUCCESS_RETURN
-        emr_session_mock = mock.MagicMock()
-        emr_session_mock.client.return_value = emr_client_mock
-        mock_session.return_value = emr_session_mock
+    def test_submit_job(self, mock_conn, provide_hook):
+        mock_conn.start_job_run.return_value = SUBMIT_JOB_SUCCESS_RETURN
 
-        emr_containers_job = self.emr_containers.submit_job(
+        emr_containers_job = provide_hook.submit_job(
             name="test-job-run",
             execution_role_arn="arn:aws:somerole",
             release_label="emr-6.3.0-latest",
             job_driver={},
-            configuration_overrides={},
-            client_request_token="uuidtoken",
         )
+
         assert emr_containers_job == "job123456"
 
-    @mock.patch("boto3.session.Session")
-    def test_query_status_polling_when_terminal(self, mock_session):
-        emr_client_mock = mock.MagicMock()
-        emr_session_mock = mock.MagicMock()
-        emr_session_mock.client.return_value = emr_client_mock
-        mock_session.return_value = emr_session_mock
-        emr_client_mock.describe_job_run.return_value = JOB1_RUN_DESCRIPTION
+    def test_query_status_polling_when_terminal(self, mock_conn, provide_hook):
+        mock_conn.describe_job_run.return_value = JOB1_RUN_DESCRIPTION
 
-        query_status = self.emr_containers.poll_query_status(job_id="job123456")
+        query_status = provide_hook.poll_query_status(job_id="job123456")
+
         # should only poll once since query is already in terminal state
-        emr_client_mock.describe_job_run.assert_called_once()
+        mock_conn.describe_job_run.assert_called_once()
         assert query_status == "COMPLETED"
 
-    @mock.patch("boto3.session.Session")
-    def test_query_status_polling_with_timeout(self, mock_session):
-        emr_client_mock = mock.MagicMock()
-        emr_session_mock = mock.MagicMock()
-        emr_session_mock.client.return_value = emr_client_mock
-        mock_session.return_value = emr_session_mock
-        emr_client_mock.describe_job_run.return_value = JOB2_RUN_DESCRIPTION
+    def test_query_status_polling_with_timeout(self, mock_conn, provide_hook):
+        mock_conn.describe_job_run.return_value = JOB2_RUN_DESCRIPTION
 
-        query_status = self.emr_containers.poll_query_status(job_id="job123456", max_polling_attempts=2)
+        query_status = provide_hook.poll_query_status(
+            job_id="job123456", max_polling_attempts=2, poll_interval=0
+        )
+
         # should poll until max_tries is reached since query is in non-terminal state
-        assert emr_client_mock.describe_job_run.call_count == 2
+        assert mock_conn.describe_job_run.call_count == 2
         assert query_status == "RUNNING"

@@ -324,7 +324,7 @@ class EmrContainerHook(AwsBaseHook):
         eks_namespace: str,
         tags: dict | None = None,
     ) -> str:
-        response = self.conn.create_virtual_cluster(
+        response = self.get_conn().create_virtual_cluster(
             name=virtual_cluster_name,
             containerProvider={
                 "id": eks_cluster_name,
@@ -382,7 +382,7 @@ class EmrContainerHook(AwsBaseHook):
         if client_request_token:
             params["clientToken"] = client_request_token
 
-        response = self.conn.start_job_run(**params)
+        response = self.get_conn().start_job_run(**params)
 
         if response["ResponseMetadata"]["HTTPStatusCode"] != 200:
             raise AirflowException(f"Start Job Run failed: {response}")
@@ -405,7 +405,7 @@ class EmrContainerHook(AwsBaseHook):
         reason = None
 
         try:
-            response = self.conn.describe_job_run(
+            response = self.get_conn().describe_job_run(
                 virtualClusterId=self.virtual_cluster_id,
                 id=job_id,
             )
@@ -427,12 +427,12 @@ class EmrContainerHook(AwsBaseHook):
         :return: str
         """
         try:
-            response = self.conn.describe_job_run(
+            response = self.get_conn().describe_job_run(
                 virtualClusterId=self.virtual_cluster_id,
                 id=job_id,
             )
             return response["jobRun"]["state"]
-        except self.conn.exceptions.ResourceNotFoundException:
+        except self.get_conn().exceptions.ResourceNotFoundException:
             # If the job is not found, we raise an exception as something fatal has happened.
             raise AirflowException(f"Job ID {job_id} not found on Virtual Cluster {self.virtual_cluster_id}")
         except ClientError as ex:
@@ -498,7 +498,7 @@ class EmrContainerHook(AwsBaseHook):
         :param job_id: Id of submitted job_run
         :return: dict
         """
-        return self.conn.cancel_job_run(
+        return self.get_conn().cancel_job_run(
             virtualClusterId=self.virtual_cluster_id,
             id=job_id,
         )

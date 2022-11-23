@@ -45,51 +45,55 @@ class TestEmrServerlessHook:
         mock_call_function.side_effect = [{"response": "test_failure"}, {"response": "test_success"}]
         success_state = {"test_success"}
         hook = EmrServerlessHook()
-        waiter_response = hook.waiter(
+
+        hook.waiter(
             get_state_callable=mock_call_function,
             get_state_args={},
             parse_response=["response"],
             desired_state=success_state,
-            failure_states={},
+            failure_states=set(),
             object_type="test_object",
             action="testing",
             check_interval_seconds=1,
         )
+
         assert mock_call_function.call_count == 2
-        assert waiter_response is None
 
     def test_waiter_success_state(self):
         mock_call_function = mock.MagicMock()
         mock_call_function.return_value = {"response": "test_success"}
         success_state = {"test_success"}
         hook = EmrServerlessHook()
-        waiter_response = hook.waiter(
+
+        hook.waiter(
             get_state_callable=mock_call_function,
             get_state_args={},
             parse_response=["response"],
             desired_state=success_state,
-            failure_states={},
+            failure_states=set(),
             object_type="test_object",
             action="testing",
         )
+
         mock_call_function.assert_called_once()
-        assert waiter_response is None
 
     def test_waiter_failure_state(self):
         mock_call_function = mock.MagicMock()
-        failure_state = {"test_failure"}
         mock_call_function.return_value = {"response": "test_failure"}
+        failure_state = {"test_failure"}
         hook = EmrServerlessHook()
+
         with pytest.raises(AirflowException) as ex_message:
             hook.waiter(
                 get_state_callable=mock_call_function,
                 get_state_args={},
                 parse_response=["response"],
-                desired_state={},
+                desired_state=set(),
                 failure_states=failure_state,
                 object_type="test_object",
                 action="testing",
             )
+
         mock_call_function.assert_called_once()
         assert str(ex_message.value) == f"Test_Object reached failure state {','.join(failure_state)}."
 
@@ -100,35 +104,38 @@ class TestEmrServerlessHook:
         }
         success_state = {"test_success"}
         hook = EmrServerlessHook()
-        waiter_response = hook.waiter(
+
+        hook.waiter(
             get_state_callable=mock_call_function,
             get_state_args={},
             parse_response=["layer1", "layer2", "response"],
             desired_state=success_state,
-            failure_states={},
+            failure_states=set(),
             object_type="test_object",
             action="testing",
         )
+
         mock_call_function.assert_called_once()
-        assert waiter_response is None
 
     def test_waiter_timeout(self):
         mock_call_function = mock.MagicMock()
         success_state = {"test_success"}
         mock_call_function.return_value = {"response": "pending"}
         hook = EmrServerlessHook()
+
         with pytest.raises(RuntimeError) as ex_message:
             hook.waiter(
                 get_state_callable=mock_call_function,
                 get_state_args={},
                 parse_response=["response"],
                 desired_state=success_state,
-                failure_states={},
+                failure_states=set(),
                 object_type="test_object",
                 action="testing",
                 check_interval_seconds=1,
                 countdown=3,
             )
+
         assert mock_call_function.call_count == 4
         assert (
             str(ex_message.value)

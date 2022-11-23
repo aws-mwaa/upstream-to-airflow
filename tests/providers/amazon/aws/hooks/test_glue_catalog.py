@@ -41,42 +41,52 @@ PARTITION_INPUT: dict = {
 }
 
 
+@pytest.fixture
+def mock_conn():
+    with mock.patch.object(GlueCatalogHook, "get_conn") as _get_conn:
+        yield _get_conn.return_value
+
+
+@pytest.fixture
+def client():
+    return boto3.client("glue")
+
+
 @mock_glue
 class TestGlueCatalogHook:
-    def setup_method(self, method):
-        self.client = boto3.client("glue", region_name="us-east-1")
-        self.hook = GlueCatalogHook(region_name="us-east-1")
-
     def test_get_conn_returns_a_boto3_connection(self):
-        hook = GlueCatalogHook(region_name="us-east-1")
+        hook = GlueCatalogHook()
+
         assert hook.get_conn() is not None
 
     def test_conn_id(self):
-        hook = GlueCatalogHook(aws_conn_id="my_aws_conn_id", region_name="us-east-1")
-        assert hook.aws_conn_id == "my_aws_conn_id"
+        conn_id = "my_aws_conn_id"
+
+        hook = GlueCatalogHook(aws_conn_id=conn_id)
+
+        assert hook.aws_conn_id == conn_id
 
     def test_region(self):
-        hook = GlueCatalogHook(region_name="us-west-2")
-        assert hook.region_name == "us-west-2"
+        region = "us-west-2"
 
-    @mock.patch.object(GlueCatalogHook, "get_conn")
-    def test_get_partitions_empty(self, mock_get_conn):
-        response = set()
-        mock_get_conn.get_paginator.paginate.return_value = response
+        hook = GlueCatalogHook(region_name=region)
+
+        assert hook.region_name == region
+
+    def test_get_partitions_empty(self, mock_conn):
+        mock_conn.get_paginator.paginate.return_value = set()
+
         hook = GlueCatalogHook(region_name="us-east-1")
 
         assert hook.get_partitions("db", "tbl") == set()
 
-    @mock.patch.object(GlueCatalogHook, "get_conn")
-    def test_get_partitions(self, mock_get_conn):
+    def test_get_partitions(self, mock_conn):
         response = [{"Partitions": [{"Values": ["2015-01-01"]}]}]
         mock_paginator = mock.Mock()
         mock_paginator.paginate.return_value = response
-        mock_conn = mock.Mock()
         mock_conn.get_paginator.return_value = mock_paginator
-        mock_get_conn.return_value = mock_conn
-        hook = GlueCatalogHook(region_name="us-east-1")
-        result = hook.get_partitions("db", "tbl", expression="foo=bar", page_size=2, max_items=3)
+
+        result = GlueCatalogHook().get_partitions("db", "tbl", expression="foo=bar", page_size=2, max_items=3)
 
         assert result == {("2015-01-01",)}
         mock_conn.get_paginator.assert_called_once_with("get_partitions")
@@ -90,84 +100,74 @@ class TestGlueCatalogHook:
     @mock.patch.object(GlueCatalogHook, "get_partitions")
     def test_check_for_partition(self, mock_get_partitions):
         mock_get_partitions.return_value = {("2018-01-01",)}
-        hook = GlueCatalogHook(region_name="us-east-1")
 
-        assert hook.check_for_partition("db", "tbl", "expr")
+        assert GlueCatalogHook().check_for_partition("db", "tbl", "expr")
         mock_get_partitions.assert_called_once_with("db", "tbl", "expr", max_items=1)
 
     @mock.patch.object(GlueCatalogHook, "get_partitions")
     def test_check_for_partition_false(self, mock_get_partitions):
         mock_get_partitions.return_value = set()
-        hook = GlueCatalogHook(region_name="us-east-1")
 
-        assert not hook.check_for_partition("db", "tbl", "expr")
+        assert not GlueCatalogHook().check_for_partition("db", "tbl", "expr")
 
-    def test_get_table_exists(self):
-        self.client.create_database(DatabaseInput={"Name": DB_NAME})
-        self.client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
+    def test_get_table_exists(self, client):
+        client.create_database(DatabaseInput={"Name": DB_NAME})
+        client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
 
-        result = self.hook.get_table(DB_NAME, TABLE_NAME)
+        result = GlueCatalogHook().get_table(DB_NAME, TABLE_NAME)
 
         assert result["Name"] == TABLE_INPUT["Name"]
         assert result["StorageDescriptor"]["Location"] == TABLE_INPUT["StorageDescriptor"]["Location"]
 
-    def test_get_table_not_exists(self):
-        self.client.create_database(DatabaseInput={"Name": DB_NAME})
-        self.client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
+    def test_get_table_not_exists(self, client):
+        client.create_database(DatabaseInput={"Name": DB_NAME})
+        client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
 
         with pytest.raises(Exception):
-            self.hook.get_table(DB_NAME, "dummy_table")
+            GlueCatalogHook().get_table(DB_NAME, "dummy_table")
 
-    def test_get_table_location(self):
-        self.client.create_database(DatabaseInput={"Name": DB_NAME})
-        self.client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
+    def test_get_table_location(self, client):
+        client.create_database(DatabaseInput={"Name": DB_NAME})
+        client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
 
-        result = self.hook.get_table_location(DB_NAME, TABLE_NAME)
+        result = GlueCatalogHook().get_table_location(DB_NAME, TABLE_NAME)
         assert result == TABLE_INPUT["StorageDescriptor"]["Location"]
 
-    def test_get_partition(self):
-        self.client.create_database(DatabaseInput={"Name": DB_NAME})
-        self.client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
-        self.client.create_partition(
-            DatabaseName=DB_NAME, TableName=TABLE_NAME, PartitionInput=PARTITION_INPUT
-        )
+    def test_get_partition(self, client):
+        client.create_database(DatabaseInput={"Name": DB_NAME})
+        client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
+        client.create_partition(DatabaseName=DB_NAME, TableName=TABLE_NAME, PartitionInput=PARTITION_INPUT)
 
-        result = self.hook.get_partition(DB_NAME, TABLE_NAME, PARTITION_INPUT["Values"])
+        result = GlueCatalogHook().get_partition(DB_NAME, TABLE_NAME, PARTITION_INPUT["Values"])
 
         assert result["Values"] == PARTITION_INPUT["Values"]
         assert result["DatabaseName"] == DB_NAME
         assert result["TableName"] == TABLE_INPUT["Name"]
 
-    @mock.patch.object(GlueCatalogHook, "get_conn")
-    def test_get_partition_with_client_error(self, mocked_connection):
-        mocked_client = mock.Mock()
-        mocked_client.get_partition.side_effect = ClientError({}, "get_partition")
-        mocked_connection.return_value = mocked_client
+    def test_get_partition_with_client_error(self, mock_conn):
+        mock_conn.get_partition.side_effect = ClientError({}, "get_partition")
 
         with pytest.raises(AirflowException):
-            self.hook.get_partition(DB_NAME, TABLE_NAME, PARTITION_INPUT["Values"])
+            GlueCatalogHook().get_partition(DB_NAME, TABLE_NAME, PARTITION_INPUT["Values"])
 
-        mocked_client.get_partition.assert_called_once_with(
+        mock_conn.get_partition.assert_called_once_with(
             DatabaseName=DB_NAME, TableName=TABLE_NAME, PartitionValues=PARTITION_INPUT["Values"]
         )
 
-    def test_create_partition(self):
-        self.client.create_database(DatabaseInput={"Name": DB_NAME})
-        self.client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
+    def test_create_partition(self, client):
+        client.create_database(DatabaseInput={"Name": DB_NAME})
+        client.create_table(DatabaseName=DB_NAME, TableInput=TABLE_INPUT)
 
-        result = self.hook.create_partition(DB_NAME, TABLE_NAME, PARTITION_INPUT)
+        result = GlueCatalogHook().create_partition(DB_NAME, TABLE_NAME, PARTITION_INPUT)
 
         assert result
 
-    @mock.patch.object(GlueCatalogHook, "get_conn")
-    def test_create_partition_with_client_error(self, mocked_connection):
-        mocked_client = mock.Mock()
-        mocked_client.create_partition.side_effect = ClientError({}, "create_partition")
-        mocked_connection.return_value = mocked_client
+    def test_create_partition_with_client_error(self, mock_conn):
+        mock_conn.create_partition.side_effect = ClientError({}, "create_partition")
 
         with pytest.raises(AirflowException):
-            self.hook.create_partition(DB_NAME, TABLE_NAME, PARTITION_INPUT)
+            GlueCatalogHook().create_partition(DB_NAME, TABLE_NAME, PARTITION_INPUT)
 
-        mocked_client.create_partition.assert_called_once_with(
+        mock_conn.create_partition.assert_called_once_with(
             DatabaseName=DB_NAME, TableName=TABLE_NAME, PartitionInput=PARTITION_INPUT
         )

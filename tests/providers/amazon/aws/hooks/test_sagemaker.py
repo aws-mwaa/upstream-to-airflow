@@ -20,7 +20,6 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from unittest import mock
-from unittest.mock import patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -37,28 +36,30 @@ from airflow.providers.amazon.aws.hooks.sagemaker import (
     secondary_training_status_message,
 )
 
-role = "arn:aws:iam:role/test-role"
+ROLE = "arn:aws:iam:role/test-role"
 
-path = "local/data"
-bucket = "test-bucket"
-key = "test/data"
-data_url = f"s3://{bucket}/{key}"
+PATH = "local/data"
+BUCKET = "test-bucket"
+KEY = "test/data"
+DATA_URL = f"s3://{BUCKET}/{KEY}"
 
-job_name = "test-job"
-model_name = "test-model"
-config_name = "test-endpoint-config"
-endpoint_name = "test-endpoint"
+JOB_NAME = "test-job"
+MODEL_NAME = "test-model"
+CONFIG_NAME = "test-endpoint-config"
+ENDPOINT_NAME = "test-endpoint"
 
-image = "test-image"
-test_arn_return = {"Arn": "testarn"}
-output_url = f"s3://{bucket}/test/output"
+IMAGE = "test-image"
+TEST_ARN_RETURN = {"Arn": "testarn"}
+OUTPUT_URL = f"s3://{BUCKET}/test/output"
 
-create_training_params = {
-    "AlgorithmSpecification": {"TrainingImage": image, "TrainingInputMode": "File"},
-    "RoleArn": role,
-    "OutputDataConfig": {"S3OutputPath": output_url},
+IN_PROGRESS = "InProgress"
+
+CREATE_TRAINING_PARAMS = {
+    "AlgorithmSpecification": {"TrainingImage": IMAGE, "TrainingInputMode": "File"},
+    "RoleArn": ROLE,
+    "OutputDataConfig": {"S3OutputPath": OUTPUT_URL},
     "ResourceConfig": {"InstanceCount": 2, "InstanceType": "ml.c4.8xlarge", "VolumeSizeInGB": 50},
-    "TrainingJobName": job_name,
+    "TrainingJobName": JOB_NAME,
     "HyperParameters": {"k": "10", "feature_dim": "784", "mini_batch_size": "500", "force_dense": "True"},
     "StoppingCondition": {"MaxRuntimeInSeconds": 60 * 60},
     "InputDataConfig": [
@@ -67,7 +68,7 @@ create_training_params = {
             "DataSource": {
                 "S3DataSource": {
                     "S3DataType": "S3Prefix",
-                    "S3Uri": data_url,
+                    "S3Uri": DATA_URL,
                     "S3DataDistributionType": "FullyReplicated",
                 }
             },
@@ -90,8 +91,8 @@ create_training_params = {
     ],
 }
 
-create_tuning_params = {
-    "HyperParameterTuningJobName": job_name,
+CREATE_TUNING_PARAMS = {
+    "HyperParameterTuningJobName": JOB_NAME,
     "HyperParameterTuningJobConfig": {
         "Strategy": "Bayesian",
         "HyperParameterTuningJobObjective": {"Type": "Maximize", "MetricName": "test_metric"},
@@ -103,30 +104,30 @@ create_tuning_params = {
         },
     },
     "TrainingJobDefinition": {
-        "StaticHyperParameters": create_training_params["HyperParameters"],
-        "AlgorithmSpecification": create_training_params["AlgorithmSpecification"],
+        "StaticHyperParameters": CREATE_TRAINING_PARAMS["HyperParameters"],
+        "AlgorithmSpecification": CREATE_TRAINING_PARAMS["AlgorithmSpecification"],
         "RoleArn": "string",
-        "InputDataConfig": create_training_params["InputDataConfig"],
-        "OutputDataConfig": create_training_params["OutputDataConfig"],
-        "ResourceConfig": create_training_params["ResourceConfig"],
+        "InputDataConfig": CREATE_TRAINING_PARAMS["InputDataConfig"],
+        "OutputDataConfig": CREATE_TRAINING_PARAMS["OutputDataConfig"],
+        "ResourceConfig": CREATE_TRAINING_PARAMS["ResourceConfig"],
         "StoppingCondition": dict(MaxRuntimeInSeconds=60 * 60),
     },
 }
 
-create_transform_params = {
-    "TransformJobName": job_name,
-    "ModelName": model_name,
+CREATE_TRANSFORM_PARAMS = {
+    "TransformJobName": JOB_NAME,
+    "ModelName": MODEL_NAME,
     "BatchStrategy": "MultiRecord",
-    "TransformInput": {"DataSource": {"S3DataSource": {"S3DataType": "S3Prefix", "S3Uri": data_url}}},
+    "TransformInput": {"DataSource": {"S3DataSource": {"S3DataType": "S3Prefix", "S3Uri": DATA_URL}}},
     "TransformOutput": {
-        "S3OutputPath": output_url,
+        "S3OutputPath": OUTPUT_URL,
     },
     "TransformResources": {"InstanceType": "ml.m4.xlarge", "InstanceCount": 123},
 }
 
-create_transform_params_fs = {
-    "TransformJobName": job_name,
-    "ModelName": model_name,
+CREATE_TRANSFORM_PARAMS_FS = {
+    "TransformJobName": JOB_NAME,
+    "ModelName": MODEL_NAME,
     "BatchStrategy": "MultiRecord",
     "TransformInput": {
         "DataSource": {
@@ -139,35 +140,35 @@ create_transform_params_fs = {
         }
     },
     "TransformOutput": {
-        "S3OutputPath": output_url,
+        "S3OutputPath": OUTPUT_URL,
     },
     "TransformResources": {"InstanceType": "ml.m4.xlarge", "InstanceCount": 123},
 }
 
-create_model_params = {
-    "ModelName": model_name,
+CREATE_MODEL_PARAMS = {
+    "ModelName": MODEL_NAME,
     "PrimaryContainer": {
-        "Image": image,
-        "ModelDataUrl": output_url,
+        "Image": IMAGE,
+        "ModelDataUrl": OUTPUT_URL,
     },
-    "ExecutionRoleArn": role,
+    "ExecutionRoleArn": ROLE,
 }
 
-create_endpoint_config_params = {
-    "EndpointConfigName": config_name,
+CREATE_ENDPOINT_CONFIG_PARAMS = {
+    "EndpointConfigName": CONFIG_NAME,
     "ProductionVariants": [
         {
             "VariantName": "AllTraffic",
-            "ModelName": model_name,
+            "ModelName": MODEL_NAME,
             "InitialInstanceCount": 1,
             "InstanceType": "ml.c4.xlarge",
         }
     ],
 }
 
-create_endpoint_params = {"EndpointName": endpoint_name, "EndpointConfigName": config_name}
+CREATE_ENDPOINT_PARAMS = {"EndpointName": ENDPOINT_NAME, "EndpointConfigName": CONFIG_NAME}
 
-update_endpoint_params = create_endpoint_params
+UPDATE_ENDPOINT_PARAMS = CREATE_ENDPOINT_PARAMS
 
 DESCRIBE_TRAINING_COMPLETED_RETURN = {
     "TrainingJobStatus": "Completed",
@@ -180,7 +181,7 @@ DESCRIBE_TRAINING_COMPLETED_RETURN = {
 }
 
 DESCRIBE_TRAINING_INPROGRESS_RETURN = dict(DESCRIBE_TRAINING_COMPLETED_RETURN)
-DESCRIBE_TRAINING_INPROGRESS_RETURN.update({"TrainingJobStatus": "InProgress"})
+DESCRIBE_TRAINING_INPROGRESS_RETURN.update({"TrainingJobStatus": IN_PROGRESS})
 
 DESCRIBE_TRAINING_FAILED_RETURN = dict(DESCRIBE_TRAINING_COMPLETED_RETURN)
 DESCRIBE_TRAINING_FAILED_RETURN.update({"TrainingJobStatus": "Failed", "FailureReason": "Unknown"})
@@ -188,16 +189,16 @@ DESCRIBE_TRAINING_FAILED_RETURN.update({"TrainingJobStatus": "Failed", "FailureR
 DESCRIBE_TRAINING_STOPPING_RETURN = dict(DESCRIBE_TRAINING_COMPLETED_RETURN)
 DESCRIBE_TRAINING_STOPPING_RETURN.update({"TrainingJobStatus": "Stopping"})
 
-message = "message"
-status = "status"
+MESSAGE = "message"
+STATUS = "status"
 SECONDARY_STATUS_DESCRIPTION_1 = {
-    "SecondaryStatusTransitions": [{"StatusMessage": message, "Status": status}]
+    "SecondaryStatusTransitions": [{"StatusMessage": MESSAGE, "Status": STATUS}]
 }
 SECONDARY_STATUS_DESCRIPTION_2 = {
-    "SecondaryStatusTransitions": [{"StatusMessage": "different message", "Status": status}]
+    "SecondaryStatusTransitions": [{"StatusMessage": "different message", "Status": STATUS}]
 }
 
-DEFAULT_LOG_STREAMS = {"logStreams": [{"logStreamName": job_name + "/xxxxxxxxx"}]}
+DEFAULT_LOG_STREAMS = {"logStreams": [{"logStreamName": JOB_NAME + "/xxxxxxxxx"}]}
 LIFECYCLE_LOG_STREAMS = [
     DEFAULT_LOG_STREAMS,
     DEFAULT_LOG_STREAMS,
@@ -230,14 +231,20 @@ STREAM_LOG_EVENTS = [
     {"nextForwardToken": None, "events": []},
 ]
 
-test_evaluation_config = {
-    "Image": image,
-    "Role": role,
+TEST_EVALUATION_CONFIG = {
+    "Image": IMAGE,
+    "Role": ROLE,
     "S3Operations": {
-        "S3CreateBucket": [{"Bucket": bucket}],
-        "S3Upload": [{"Path": path, "Bucket": bucket, "Key": key, "Tar": False}],
+        "S3CreateBucket": [{"Bucket": BUCKET}],
+        "S3Upload": [{"Path": PATH, "Bucket": BUCKET, "Key": KEY, "Tar": False}],
     },
 }
+
+
+@pytest.fixture
+def mock_conn():
+    with mock.patch.object(SageMakerHook, "get_conn") as _get_conn:
+        yield _get_conn.return_value
 
 
 class TestSageMakerHook:
@@ -245,273 +252,216 @@ class TestSageMakerHook:
     def test_multi_stream_iter(self, mock_log_stream):
         event = {"timestamp": 1}
         mock_log_stream.side_effect = [iter([event]), iter([]), None]
-        hook = SageMakerHook()
-        event_iter = hook.multi_stream_iter("log", [None, None, None])
+
+        event_iter = SageMakerHook().multi_stream_iter("log", [None, None, None])
+
         assert next(event_iter) == (0, event)
 
     @mock.patch.object(S3Hook, "create_bucket")
     @mock.patch.object(S3Hook, "load_file")
     def test_configure_s3_resources(self, mock_load_file, mock_create_bucket):
-        hook = SageMakerHook()
-        evaluation_result = {"Image": image, "Role": role}
-        hook.configure_s3_resources(test_evaluation_config)
-        assert test_evaluation_config == evaluation_result
-        mock_create_bucket.assert_called_once_with(bucket_name=bucket)
-        mock_load_file.assert_called_once_with(path, key, bucket)
+        evaluation_result = {"Image": IMAGE, "Role": ROLE}
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    @mock.patch.object(S3Hook, "check_for_key")
-    @mock.patch.object(S3Hook, "check_for_bucket")
-    @mock.patch.object(S3Hook, "check_for_prefix")
-    def test_check_s3_url(self, mock_check_prefix, mock_check_bucket, mock_check_key, mock_client):
-        mock_client.return_value = None
-        hook = SageMakerHook()
-        mock_check_bucket.side_effect = [False, True, True, True]
-        mock_check_key.side_effect = [False, True, False]
-        mock_check_prefix.side_effect = [False, True, True]
-        with pytest.raises(AirflowException):
-            hook.check_s3_url(data_url)
-        with pytest.raises(AirflowException):
-            hook.check_s3_url(data_url)
-        assert hook.check_s3_url(data_url) is True
-        assert hook.check_s3_url(data_url) is True
+        SageMakerHook().configure_s3_resources(TEST_EVALUATION_CONFIG)
 
-    @mock.patch.object(SageMakerHook, "get_conn")
+        assert TEST_EVALUATION_CONFIG == evaluation_result
+        mock_create_bucket.assert_called_once_with(bucket_name=BUCKET)
+        mock_load_file.assert_called_once_with(PATH, KEY, BUCKET)
+
+    @mock.patch.object(S3Hook, "check_for_key", side_effect=[False, True, False])
+    @mock.patch.object(S3Hook, "check_for_bucket", side_effect=[False, True, True, True])
+    @mock.patch.object(S3Hook, "check_for_prefix", side_effect=[False, True, True])
+    def test_check_s3_url(self, *_):
+        hook = SageMakerHook()
+
+        with pytest.raises(AirflowException):
+            hook.check_s3_url(DATA_URL)
+        with pytest.raises(AirflowException):
+            hook.check_s3_url(DATA_URL)
+
+        assert hook.check_s3_url(DATA_URL) is True
+        assert hook.check_s3_url(DATA_URL) is True
+
     @mock.patch.object(SageMakerHook, "check_s3_url")
-    def test_check_valid_training(self, mock_check_url, mock_client):
-        mock_client.return_value = None
-        hook = SageMakerHook()
-        hook.check_training_config(create_training_params)
-        mock_check_url.assert_called_once_with(data_url)
+    def test_check_valid_training(self, mock_check_url):
+        SageMakerHook().check_training_config(CREATE_TRAINING_PARAMS)
+
+        mock_check_url.assert_called_once_with(DATA_URL)
 
         # InputDataConfig is optional, verify if check succeeds without InputDataConfig
-        create_training_params_no_inputdataconfig = create_training_params.copy()
+        create_training_params_no_inputdataconfig = CREATE_TRAINING_PARAMS.copy()
         create_training_params_no_inputdataconfig.pop("InputDataConfig")
-        hook.check_training_config(create_training_params_no_inputdataconfig)
+        SageMakerHook().check_training_config(create_training_params_no_inputdataconfig)
 
-    @mock.patch.object(SageMakerHook, "get_conn")
     @mock.patch.object(SageMakerHook, "check_s3_url")
-    def test_check_valid_tuning(self, mock_check_url, mock_client):
-        mock_client.return_value = None
-        hook = SageMakerHook()
-        hook.check_tuning_config(create_tuning_params)
-        mock_check_url.assert_called_once_with(data_url)
+    def test_check_valid_tuning(self, mock_check_url):
+        SageMakerHook().check_tuning_config(CREATE_TUNING_PARAMS)
+
+        mock_check_url.assert_called_once_with(DATA_URL)
 
     def test_conn(self):
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        assert hook.aws_conn_id == "sagemaker_test_conn_id"
+        conn_id = "sagemaker_test_conn_id"
+
+        hook = SageMakerHook(aws_conn_id=conn_id)
+
+        assert hook.aws_conn_id == conn_id
 
     @mock.patch.object(SageMakerHook, "check_training_config")
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_create_training_job(self, mock_client, mock_check_training):
-        mock_check_training.return_value = True
-        mock_session = mock.Mock()
-        attrs = {"create_training_job.return_value": test_arn_return}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.create_training_job(
-            create_training_params, wait_for_completion=False, print_log=False
+    def test_create_training_job(self, _, mock_conn):
+        mock_conn.create_training_job.return_value = TEST_ARN_RETURN
+
+        response = SageMakerHook().create_training_job(
+            CREATE_TRAINING_PARAMS, wait_for_completion=False, print_log=False
         )
-        mock_session.create_training_job.assert_called_once_with(**create_training_params)
-        assert response == test_arn_return
+
+        mock_conn.create_training_job.assert_called_once_with(**CREATE_TRAINING_PARAMS)
+        assert response == TEST_ARN_RETURN
 
     @mock.patch.object(SageMakerHook, "check_training_config")
-    @mock.patch.object(SageMakerHook, "get_conn")
     @mock.patch("time.sleep", return_value=None)
-    def test_training_ends_with_wait(self, _, mock_client, mock_check_training):
-        mock_check_training.return_value = True
-        mock_session = mock.Mock()
-        attrs = {
-            "create_training_job.return_value": test_arn_return,
-            "describe_training_job.side_effect": [
-                DESCRIBE_TRAINING_INPROGRESS_RETURN,
-                DESCRIBE_TRAINING_STOPPING_RETURN,
-                DESCRIBE_TRAINING_COMPLETED_RETURN,
-            ],
-        }
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id_1")
-        hook.create_training_job(
-            create_training_params, wait_for_completion=True, print_log=False, check_interval=0
+    def test_training_ends_with_wait(self, mock_sleep, _, mock_conn):
+        mock_conn.create_training_job.return_value = TEST_ARN_RETURN
+        mock_conn.describe_training_job.side_effect = [
+            DESCRIBE_TRAINING_INPROGRESS_RETURN,
+            DESCRIBE_TRAINING_STOPPING_RETURN,
+            DESCRIBE_TRAINING_COMPLETED_RETURN,
+        ]
+
+        SageMakerHook().create_training_job(
+            CREATE_TRAINING_PARAMS, wait_for_completion=True, print_log=False, check_interval=0
         )
-        assert mock_session.describe_training_job.call_count == 3
+
+        assert mock_conn.describe_training_job.call_count == 3
 
     @mock.patch.object(SageMakerHook, "check_training_config")
-    @mock.patch.object(SageMakerHook, "get_conn")
     @mock.patch("time.sleep", return_value=None)
-    def test_training_throws_error_when_failed_with_wait(self, _, mock_client, mock_check_training):
-        mock_check_training.return_value = True
-        mock_session = mock.Mock()
-        attrs = {
-            "create_training_job.return_value": test_arn_return,
-            "describe_training_job.side_effect": [
-                DESCRIBE_TRAINING_INPROGRESS_RETURN,
-                DESCRIBE_TRAINING_STOPPING_RETURN,
-                DESCRIBE_TRAINING_FAILED_RETURN,
-                DESCRIBE_TRAINING_COMPLETED_RETURN,
-            ],
-        }
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id_1")
+    def test_training_throws_error_when_failed_with_wait(self, mock_sleep, _, mock_conn):
+        mock_conn.create_training_job.return_value = TEST_ARN_RETURN
+        mock_conn.describe_training_job.side_effect = [
+            DESCRIBE_TRAINING_INPROGRESS_RETURN,
+            DESCRIBE_TRAINING_STOPPING_RETURN,
+            DESCRIBE_TRAINING_FAILED_RETURN,
+            DESCRIBE_TRAINING_COMPLETED_RETURN,
+        ]
+
         with pytest.raises(AirflowException):
-            hook.create_training_job(
-                create_training_params,
+            SageMakerHook().create_training_job(
+                CREATE_TRAINING_PARAMS,
                 wait_for_completion=True,
                 print_log=False,
                 check_interval=0,
             )
-        assert mock_session.describe_training_job.call_count == 3
+
+        assert mock_conn.describe_training_job.call_count == 3
 
     @mock.patch.object(SageMakerHook, "check_tuning_config")
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_create_tuning_job(self, mock_client, mock_check_tuning_config):
-        mock_session = mock.Mock()
-        attrs = {"create_hyper_parameter_tuning_job.return_value": test_arn_return}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.create_tuning_job(create_tuning_params, wait_for_completion=False)
-        mock_session.create_hyper_parameter_tuning_job.assert_called_once_with(**create_tuning_params)
-        assert response == test_arn_return
+    def test_create_tuning_job(self, _, mock_conn):
+        mock_conn.create_hyper_parameter_tuning_job.return_value = TEST_ARN_RETURN
+
+        response = SageMakerHook().create_tuning_job(CREATE_TUNING_PARAMS, wait_for_completion=False)
+
+        mock_conn.create_hyper_parameter_tuning_job.assert_called_once_with(**CREATE_TUNING_PARAMS)
+        assert response == TEST_ARN_RETURN
 
     @mock.patch.object(SageMakerHook, "check_s3_url")
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_create_transform_job(self, mock_client, mock_check_url):
+    def test_create_transform_job(self, mock_check_url, mock_conn):
         mock_check_url.return_value = True
-        mock_session = mock.Mock()
-        attrs = {"create_transform_job.return_value": test_arn_return}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.create_transform_job(create_transform_params, wait_for_completion=False)
-        mock_session.create_transform_job.assert_called_once_with(**create_transform_params)
-        assert response == test_arn_return
+        mock_conn.create_transform_job.return_value = TEST_ARN_RETURN
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_create_transform_job_fs(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"create_transform_job.return_value": test_arn_return}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.create_transform_job(create_transform_params_fs, wait_for_completion=False)
-        mock_session.create_transform_job.assert_called_once_with(**create_transform_params_fs)
-        assert response == test_arn_return
+        response = SageMakerHook().create_transform_job(CREATE_TRANSFORM_PARAMS, wait_for_completion=False)
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_create_model(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"create_model.return_value": test_arn_return}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.create_model(create_model_params)
-        mock_session.create_model.assert_called_once_with(**create_model_params)
-        assert response == test_arn_return
+        mock_conn.create_transform_job.assert_called_once_with(**CREATE_TRANSFORM_PARAMS)
+        assert response == TEST_ARN_RETURN
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_create_endpoint_config(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"create_endpoint_config.return_value": test_arn_return}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.create_endpoint_config(create_endpoint_config_params)
-        mock_session.create_endpoint_config.assert_called_once_with(**create_endpoint_config_params)
-        assert response == test_arn_return
+    def test_create_transform_job_fs(self, mock_conn):
+        mock_conn.create_transform_job.return_value = TEST_ARN_RETURN
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_create_endpoint(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"create_endpoint.return_value": test_arn_return}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.create_endpoint(create_endpoint_params, wait_for_completion=False)
-        mock_session.create_endpoint.assert_called_once_with(**create_endpoint_params)
-        assert response == test_arn_return
+        response = SageMakerHook().create_transform_job(CREATE_TRANSFORM_PARAMS_FS, wait_for_completion=False)
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_update_endpoint(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"update_endpoint.return_value": test_arn_return}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.update_endpoint(update_endpoint_params, wait_for_completion=False)
-        mock_session.update_endpoint.assert_called_once_with(**update_endpoint_params)
-        assert response == test_arn_return
+        mock_conn.create_transform_job.assert_called_once_with(**CREATE_TRANSFORM_PARAMS_FS)
+        assert response == TEST_ARN_RETURN
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_describe_training_job(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"describe_training_job.return_value": "InProgress"}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.describe_training_job(job_name)
-        mock_session.describe_training_job.assert_called_once_with(TrainingJobName=job_name)
-        assert response == "InProgress"
+    def test_create_model(self, mock_conn):
+        mock_conn.create_model.return_value = TEST_ARN_RETURN
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_describe_tuning_job(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"describe_hyper_parameter_tuning_job.return_value": "InProgress"}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.describe_tuning_job(job_name)
-        mock_session.describe_hyper_parameter_tuning_job.assert_called_once_with(
-            HyperParameterTuningJobName=job_name
+        response = SageMakerHook().create_model(CREATE_MODEL_PARAMS)
+
+        mock_conn.create_model.assert_called_once_with(**CREATE_MODEL_PARAMS)
+        assert response == TEST_ARN_RETURN
+
+    def test_create_endpoint_config(self, mock_conn):
+        mock_conn.create_endpoint_config.return_value = TEST_ARN_RETURN
+
+        response = SageMakerHook().create_endpoint_config(CREATE_ENDPOINT_CONFIG_PARAMS)
+
+        mock_conn.create_endpoint_config.assert_called_once_with(**CREATE_ENDPOINT_CONFIG_PARAMS)
+        assert response == TEST_ARN_RETURN
+
+    def test_create_endpoint(self, mock_conn):
+        mock_conn.create_endpoint.return_value = TEST_ARN_RETURN
+
+        response = SageMakerHook().create_endpoint(CREATE_ENDPOINT_PARAMS, wait_for_completion=False)
+
+        mock_conn.create_endpoint.assert_called_once_with(**CREATE_ENDPOINT_PARAMS)
+        assert response == TEST_ARN_RETURN
+
+    def test_update_endpoint(self, mock_conn):
+        mock_conn.update_endpoint.return_value = TEST_ARN_RETURN
+
+        response = SageMakerHook().update_endpoint(UPDATE_ENDPOINT_PARAMS, wait_for_completion=False)
+
+        mock_conn.update_endpoint.assert_called_once_with(**UPDATE_ENDPOINT_PARAMS)
+        assert response == TEST_ARN_RETURN
+
+    def test_describe_training_job(self, mock_conn):
+        mock_conn.describe_training_job.return_value = IN_PROGRESS
+
+        response = SageMakerHook().describe_training_job(JOB_NAME)
+
+        mock_conn.describe_training_job.assert_called_once_with(TrainingJobName=JOB_NAME)
+        assert response == IN_PROGRESS
+
+    def test_describe_tuning_job(self, mock_conn):
+        mock_conn.describe_hyper_parameter_tuning_job.return_value = IN_PROGRESS
+
+        response = SageMakerHook().describe_tuning_job(JOB_NAME)
+
+        mock_conn.describe_hyper_parameter_tuning_job.assert_called_once_with(
+            HyperParameterTuningJobName=JOB_NAME
         )
-        assert response == "InProgress"
+        assert response == IN_PROGRESS
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_describe_transform_job(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"describe_transform_job.return_value": "InProgress"}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.describe_transform_job(job_name)
-        mock_session.describe_transform_job.assert_called_once_with(TransformJobName=job_name)
-        assert response == "InProgress"
+    def test_describe_transform_job(self, mock_conn):
+        mock_conn.describe_transform_job.return_value = IN_PROGRESS
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_describe_model(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"describe_model.return_value": model_name}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.describe_model(model_name)
-        mock_session.describe_model.assert_called_once_with(ModelName=model_name)
-        assert response == model_name
+        response = SageMakerHook().describe_transform_job(JOB_NAME)
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_describe_endpoint_config(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"describe_endpoint_config.return_value": config_name}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.describe_endpoint_config(config_name)
-        mock_session.describe_endpoint_config.assert_called_once_with(EndpointConfigName=config_name)
-        assert response == config_name
+        mock_conn.describe_transform_job.assert_called_once_with(TransformJobName=JOB_NAME)
+        assert response == IN_PROGRESS
 
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_describe_endpoint(self, mock_client):
-        mock_session = mock.Mock()
-        attrs = {"describe_endpoint.return_value": "InProgress"}
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.describe_endpoint(endpoint_name)
-        mock_session.describe_endpoint.assert_called_once_with(EndpointName=endpoint_name)
-        assert response == "InProgress"
+    def test_describe_model(self, mock_conn):
+        mock_conn.describe_model.return_value = MODEL_NAME
+
+        response = SageMakerHook().describe_model(MODEL_NAME)
+
+        mock_conn.describe_model.assert_called_once_with(ModelName=MODEL_NAME)
+        assert response == MODEL_NAME
+
+    def test_describe_endpoint_config(self, mock_conn):
+        mock_conn.describe_endpoint_config.return_value = CONFIG_NAME
+
+        response = SageMakerHook().describe_endpoint_config(CONFIG_NAME)
+
+        mock_conn.describe_endpoint_config.assert_called_once_with(EndpointConfigName=CONFIG_NAME)
+        assert response == CONFIG_NAME
+
+    def test_describe_endpoint(self, mock_conn):
+        mock_conn.describe_endpoint.return_value = IN_PROGRESS
+
+        response = SageMakerHook().describe_endpoint(ENDPOINT_NAME)
+
+        mock_conn.describe_endpoint.assert_called_once_with(EndpointName=ENDPOINT_NAME)
+        assert response == IN_PROGRESS
 
     def test_secondary_training_status_changed_true(self):
         changed = secondary_training_status_changed(
@@ -529,31 +479,22 @@ class TestSageMakerHook:
         now = datetime.now(tzlocal())
         SECONDARY_STATUS_DESCRIPTION_1["LastModifiedTime"] = now
         expected_time = datetime.utcfromtimestamp(time.mktime(now.timetuple())).strftime("%Y-%m-%d %H:%M:%S")
-        expected = f"{expected_time} {status} - {message}"
+        expected = f"{expected_time} {STATUS} - {MESSAGE}"
         assert (
             secondary_training_status_message(SECONDARY_STATUS_DESCRIPTION_1, SECONDARY_STATUS_DESCRIPTION_2)
             == expected
         )
 
     @mock.patch.object(AwsLogsHook, "get_conn")
-    @mock.patch.object(SageMakerHook, "get_conn")
     @mock.patch.object(time, "monotonic")
-    def test_describe_training_job_with_logs_in_progress(self, mock_time, mock_client, mock_log_client):
-        mock_session = mock.Mock()
-        mock_log_session = mock.Mock()
-        attrs = {"describe_training_job.return_value": DESCRIBE_TRAINING_COMPLETED_RETURN}
-        log_attrs = {
-            "describe_log_streams.side_effect": LIFECYCLE_LOG_STREAMS,
-            "get_log_events.side_effect": STREAM_LOG_EVENTS,
-        }
+    def test_describe_training_job_with_logs_in_progress(self, mock_time, mock_log_conn, mock_conn):
         mock_time.return_value = 50
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        mock_log_session.configure_mock(**log_attrs)
-        mock_log_client.return_value = mock_log_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.describe_training_job_with_log(
-            job_name=job_name,
+        mock_conn.describe_training_job.return_value = DESCRIBE_TRAINING_COMPLETED_RETURN
+        mock_log_conn.return_value.describe_log_streams.side_effect = LIFECYCLE_LOG_STREAMS
+        mock_log_conn.return_value.get_log_events.side_effect = STREAM_LOG_EVENTS
+
+        response = SageMakerHook().describe_training_job_with_log(
+            job_name=JOB_NAME,
             positions={},
             stream_names=[],
             instance_count=1,
@@ -561,26 +502,18 @@ class TestSageMakerHook:
             last_description={},
             last_describe_job_call=0,
         )
+
         assert response == (LogState.JOB_COMPLETE, {}, 50)
 
     @pytest.mark.parametrize("log_state", [LogState.JOB_COMPLETE, LogState.COMPLETE])
     @mock.patch.object(AwsLogsHook, "get_conn")
-    @mock.patch.object(SageMakerHook, "get_conn")
-    def test_describe_training_job_with_complete_states(self, mock_client, mock_log_client, log_state):
-        mock_session = mock.Mock()
-        mock_log_session = mock.Mock()
-        attrs = {"describe_training_job.return_value": DESCRIBE_TRAINING_COMPLETED_RETURN}
-        log_attrs = {
-            "describe_log_streams.side_effect": LIFECYCLE_LOG_STREAMS,
-            "get_log_events.side_effect": STREAM_LOG_EVENTS,
-        }
-        mock_session.configure_mock(**attrs)
-        mock_client.return_value = mock_session
-        mock_log_session.configure_mock(**log_attrs)
-        mock_log_client.return_value = mock_log_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        response = hook.describe_training_job_with_log(
-            job_name=job_name,
+    def test_describe_training_job_with_complete_states(self, mock_log_conn, log_state, mock_conn):
+        mock_conn.describe_training_job.return_value = DESCRIBE_TRAINING_COMPLETED_RETURN
+        mock_log_conn.return_value.describe_log_streams.side_effect = LIFECYCLE_LOG_STREAMS
+        mock_log_conn.return_value.get_log_events.side_effect = STREAM_LOG_EVENTS
+
+        response = SageMakerHook().describe_training_job_with_log(
+            job_name=JOB_NAME,
             positions={},
             stream_names=[],
             instance_count=1,
@@ -588,89 +521,72 @@ class TestSageMakerHook:
             last_description={},
             last_describe_job_call=0,
         )
+
         assert response == (LogState.COMPLETE, {}, 0)
 
-    @mock.patch.object(SageMakerHook, "check_training_config")
-    @mock.patch.object(AwsLogsHook, "get_conn")
-    @mock.patch.object(SageMakerHook, "get_conn")
-    @mock.patch.object(SageMakerHook, "describe_training_job_with_log")
+    @mock.patch.object(SageMakerHook, "check_training_config", return_value=True)
     @mock.patch("time.sleep", return_value=None)
-    def test_training_with_logs(self, _, mock_describe, mock_client, mock_log_client, mock_check_training):
-        mock_check_training.return_value = True
+    @mock.patch.object(AwsLogsHook, "get_conn")
+    @mock.patch.object(SageMakerHook, "describe_training_job_with_log")
+    def test_training_with_logs(self, mock_describe, mock_log_conn, mock_sleep, _, mock_conn):
         mock_describe.side_effect = [
             (LogState.WAIT_IN_PROGRESS, DESCRIBE_TRAINING_INPROGRESS_RETURN, 0),
             (LogState.JOB_COMPLETE, DESCRIBE_TRAINING_STOPPING_RETURN, 0),
             (LogState.COMPLETE, DESCRIBE_TRAINING_COMPLETED_RETURN, 0),
         ]
-        mock_session = mock.Mock()
-        mock_log_session = mock.Mock()
-        attrs = {
-            "create_training_job.return_value": test_arn_return,
-            "describe_training_job.return_value": DESCRIBE_TRAINING_COMPLETED_RETURN,
-        }
-        log_attrs = {
-            "describe_log_streams.side_effect": LIFECYCLE_LOG_STREAMS,
-            "get_log_events.side_effect": STREAM_LOG_EVENTS,
-        }
-        mock_session.configure_mock(**attrs)
-        mock_log_session.configure_mock(**log_attrs)
-        mock_client.return_value = mock_session
-        mock_log_client.return_value = mock_log_session
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id_1")
-        hook.create_training_job(
-            create_training_params, wait_for_completion=True, print_log=True, check_interval=0
-        )
-        assert mock_describe.call_count == 3
-        assert mock_session.describe_training_job.call_count == 1
+        mock_conn.create_training_job.return_value = TEST_ARN_RETURN
+        mock_conn.describe_training_job.return_value = DESCRIBE_TRAINING_COMPLETED_RETURN
+        mock_log_conn.return_value.describe_log_streams.side_effect = LIFECYCLE_LOG_STREAMS
+        mock_log_conn.return_value.get_log_events.side_effect = STREAM_LOG_EVENTS
 
-    @mock.patch.object(SageMakerHook, "get_conn")
+        SageMakerHook().create_training_job(
+            CREATE_TRAINING_PARAMS, wait_for_completion=True, print_log=True, check_interval=0
+        )
+
+        assert mock_describe.call_count == 3
+        assert mock_conn.describe_training_job.call_count == 1
+
     def test_find_processing_job_by_name(self, mock_conn):
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        mock_conn().list_processing_jobs.return_value = {
+        mock_conn.list_processing_jobs.return_value = {
             "ProcessingJobSummaries": [{"ProcessingJobName": "existing_job"}]
         }
 
         with pytest.warns(DeprecationWarning):
-            ret = hook.find_processing_job_by_name("existing_job")
-            assert ret
+            result = SageMakerHook().find_processing_job_by_name("existing_job")
+            assert result
 
-    @mock.patch.object(SageMakerHook, "get_conn")
     def test_find_processing_job_by_name_job_not_exists_should_return_false(self, mock_conn):
         error_resp = {"Error": {"Code": "ValidationException"}}
-        mock_conn().describe_processing_job.side_effect = ClientError(
+        mock_conn.describe_processing_job.side_effect = ClientError(
             error_response=error_resp, operation_name="empty"
         )
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
 
         with pytest.warns(DeprecationWarning):
-            ret = hook.find_processing_job_by_name("existing_job")
-            assert not ret
+            result = SageMakerHook().find_processing_job_by_name("existing_job")
+            assert not result
 
-    @mock.patch.object(SageMakerHook, "get_conn")
     def test_count_processing_jobs_by_name(self, mock_conn):
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
         existing_job_name = "existing_job"
-        mock_conn().list_processing_jobs.return_value = {
+        mock_conn.list_processing_jobs.return_value = {
             "ProcessingJobSummaries": [{"ProcessingJobName": existing_job_name}]
         }
-        ret = hook.count_processing_jobs_by_name(existing_job_name)
-        assert ret == 1
 
-    @mock.patch.object(SageMakerHook, "get_conn")
+        result = SageMakerHook().count_processing_jobs_by_name(existing_job_name)
+
+        assert result == 1
+
     def test_count_processing_jobs_by_name_only_counts_actual_hits(self, mock_conn):
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
         existing_job_name = "existing_job"
-        mock_conn().list_processing_jobs.return_value = {
+        mock_conn.list_processing_jobs.return_value = {
             "ProcessingJobSummaries": [
                 {"ProcessingJobName": existing_job_name},
                 {"ProcessingJobName": f"contains_but_does_not_start_with_{existing_job_name}"},
                 {"ProcessingJobName": f"{existing_job_name}_with_different_suffix-123"},
             ]
         }
-        ret = hook.count_processing_jobs_by_name(existing_job_name)
+        ret = SageMakerHook().count_processing_jobs_by_name(existing_job_name)
         assert ret == 1
 
-    @mock.patch.object(SageMakerHook, "get_conn")
     @mock.patch("time.sleep", return_value=None)
     def test_count_processing_jobs_by_name_retries_on_throttle_exception(self, _, mock_conn):
         throttle_exception = ClientError(
@@ -678,52 +594,46 @@ class TestSageMakerHook:
         )
         successful_result = {"ProcessingJobSummaries": [{"ProcessingJobName": "existing_job"}]}
         # Return a ThrottleException on the first call, then a mocked successful value the second.
-        mock_conn().list_processing_jobs.side_effect = [throttle_exception, successful_result]
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
+        mock_conn.list_processing_jobs.side_effect = [throttle_exception, successful_result]
 
-        ret = hook.count_processing_jobs_by_name("existing_job")
+        result = SageMakerHook().count_processing_jobs_by_name("existing_job")
 
-        assert mock_conn().list_processing_jobs.call_count == 2
-        assert ret == 1
+        assert mock_conn.list_processing_jobs.call_count == 2
+        assert result == 1
 
-    @mock.patch.object(SageMakerHook, "get_conn")
     @mock.patch("time.sleep", return_value=None)
     def test_count_processing_jobs_by_name_fails_after_max_retries(self, _, mock_conn):
-        mock_conn().list_processing_jobs.side_effect = ClientError(
+        mock_conn.list_processing_jobs.side_effect = ClientError(
             error_response={"Error": {"Code": "ThrottlingException"}}, operation_name="empty"
         )
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
-        retries = 3
+        retry_count = 3
 
         with pytest.raises(ClientError) as raised_exception:
-            hook.count_processing_jobs_by_name("existing_job", retries=retries)
+            SageMakerHook().count_processing_jobs_by_name("existing_job", retries=retry_count)
 
-        assert mock_conn().list_processing_jobs.call_count == retries + 1
+        assert mock_conn.list_processing_jobs.call_count == retry_count + 1
         assert raised_exception.value.response["Error"]["Code"] == "ThrottlingException"
 
-    @mock.patch.object(SageMakerHook, "get_conn")
     def test_count_processing_jobs_by_name_job_not_exists_should_return_falsy(self, mock_conn):
         error_resp = {"Error": {"Code": "ResourceNotFound"}}
-        mock_conn().list_processing_jobs.side_effect = ClientError(
+        mock_conn.list_processing_jobs.side_effect = ClientError(
             error_response=error_resp, operation_name="empty"
         )
-        hook = SageMakerHook(aws_conn_id="sagemaker_test_conn_id")
 
-        ret = hook.count_processing_jobs_by_name("existing_job")
-        assert ret == 0
+        result = SageMakerHook().count_processing_jobs_by_name("existing_job")
 
-    @mock_sagemaker
-    def test_delete_model(self):
-        hook = SageMakerHook(aws_conn_id="aws_default")
-        with patch.object(hook.conn, "delete_model") as mock_delete:
-            hook.delete_model(model_name="test")
-        mock_delete.assert_called_once_with(ModelName="test")
+        assert result == 0
+
+    def test_delete_model(self, mock_conn):
+        SageMakerHook().delete_model(model_name="test")
+
+        mock_conn.delete_model.assert_called_once_with(ModelName="test")
 
     @mock_sagemaker
     def test_delete_model_when_not_exist(self):
-        hook = SageMakerHook(aws_conn_id="aws_default")
         with pytest.raises(ClientError) as raised_exception:
-            hook.delete_model(model_name="test")
+            SageMakerHook().delete_model(model_name="test")
         ex = raised_exception.value
+
         assert ex.operation_name == "DeleteModel"
         assert ex.response["ResponseMetadata"]["HTTPStatusCode"] == 404

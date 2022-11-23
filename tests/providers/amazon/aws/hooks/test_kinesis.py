@@ -55,7 +55,6 @@ class TestFirehoseHook:
         assert stream_arn == "arn:aws:firehose:us-east-1:123456789012:deliverystream/test_airflow"
 
         records = [{"Data": str(uuid.uuid4())} for _ in range(100)]
-
         response = hook.put_records(records)
 
         assert response["FailedPutCount"] == 0

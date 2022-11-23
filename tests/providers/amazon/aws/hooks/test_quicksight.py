@@ -78,65 +78,61 @@ MOCK_DESCRIBE_INGESTION_FAILURE = {
 }
 
 
+@pytest.fixture
+def mock_conn():
+    with mock.patch.object(QuickSightHook, "get_conn") as _get_conn:
+        yield _get_conn.return_value
+
+
 class TestQuicksight:
     def test_get_conn_returns_a_boto3_connection(self):
-        hook = QuickSightHook(aws_conn_id="aws_default", region_name="us-east-1")
+        hook = QuickSightHook()
         assert hook.conn is not None
 
-    @mock.patch.object(QuickSightHook, "get_conn")
-    @mock.patch.object(StsHook, "get_conn")
-    @mock.patch.object(StsHook, "get_account_number")
-    def test_create_ingestion(self, mock_get_account_number, sts_conn, mock_conn):
-        mock_conn.return_value.create_ingestion.return_value = MOCK_CREATE_INGESTION_RESPONSE
-        mock_get_account_number.return_value = AWS_ACCOUNT_ID
-        quicksight_hook = QuickSightHook(aws_conn_id="aws_default", region_name="us-east-1")
-        result = quicksight_hook.create_ingestion(
+    @mock.patch.object(StsHook, "get_account_number", return_value=AWS_ACCOUNT_ID)
+    def test_create_ingestion(self, _, mock_conn):
+        mock_conn.create_ingestion.return_value = MOCK_CREATE_INGESTION_RESPONSE
+        expected_call_params = MOCK_DATA
+
+        result = QuickSightHook().create_ingestion(
             data_set_id="DemoDataSet",
             ingestion_id="DemoDataSet_Ingestion",
             ingestion_type="INCREMENTAL_REFRESH",
         )
-        expected_call_params = MOCK_DATA
-        mock_conn.return_value.create_ingestion.assert_called_with(**expected_call_params)
+
+        mock_conn.create_ingestion.assert_called_with(**expected_call_params)
         assert result == MOCK_CREATE_INGESTION_RESPONSE
 
-    @mock.patch.object(StsHook, "get_conn")
-    @mock.patch.object(StsHook, "get_account_number")
-    def test_create_ingestion_exception(self, mock_get_account_number, sts_conn):
-        mock_get_account_number.return_value = AWS_ACCOUNT_ID
-        hook = QuickSightHook(aws_conn_id="aws_default")
+    @mock.patch.object(StsHook, "get_account_number", return_value=AWS_ACCOUNT_ID)
+    def test_create_ingestion_exception(self, _):
         with pytest.raises(ClientError) as raised_exception:
-            hook.create_ingestion(
+            QuickSightHook().create_ingestion(
                 data_set_id="DemoDataSet",
                 ingestion_id="DemoDataSet_Ingestion",
                 ingestion_type="INCREMENTAL_REFRESH",
             )
         ex = raised_exception.value
+
         assert ex.operation_name == "CreateIngestion"
 
-    @mock.patch.object(QuickSightHook, "get_conn")
     def test_get_job_status(self, mock_conn):
-        """
-        Test get job status
-        """
-        mock_conn.return_value.describe_ingestion.return_value = MOCK_DESCRIBE_INGESTION_SUCCESS
-        quicksight_hook = QuickSightHook(aws_conn_id="aws_default", region_name="us-east-1")
-        result = quicksight_hook.get_status(
+        mock_conn.describe_ingestion.return_value = MOCK_DESCRIBE_INGESTION_SUCCESS
+
+        result = QuickSightHook().get_status(
             data_set_id="DemoDataSet",
             ingestion_id="DemoDataSet_Ingestion",
             aws_account_id="123456789012",
         )
+
         assert result == "COMPLETED"
 
-    @mock.patch.object(QuickSightHook, "get_conn")
     def test_get_job_status_failed(self, mock_conn):
-        """
-        Test get job status
-        """
-        mock_conn.return_value.describe_ingestion.return_value = MOCK_DESCRIBE_INGESTION_FAILURE
-        quicksight_hook = QuickSightHook(aws_conn_id="aws_default", region_name="us-east-1")
-        result = quicksight_hook.get_status(
+        mock_conn.describe_ingestion.return_value = MOCK_DESCRIBE_INGESTION_FAILURE
+
+        result = QuickSightHook().get_status(
             data_set_id="DemoDataSet",
             ingestion_id="DemoDataSet_Ingestion",
             aws_account_id="123456789012",
         )
+
         assert result == "Failed"

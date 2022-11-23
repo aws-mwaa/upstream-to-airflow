@@ -36,7 +36,7 @@ def rds_hook() -> RdsHook:
 @pytest.fixture
 def db_instance_id(rds_hook: RdsHook) -> str:
     """Creates an RDS DB instance and returns its id"""
-    response = rds_hook.conn.create_db_instance(
+    response = rds_hook.get_conn().create_db_instance(
         DBInstanceIdentifier="testrdshook-db-instance",
         DBInstanceClass="db.t4g.micro",
         Engine="postgres",
@@ -50,13 +50,11 @@ def db_instance_id(rds_hook: RdsHook) -> str:
 @pytest.fixture
 def db_cluster_id(rds_hook: RdsHook) -> str:
     """Creates an RDS DB cluster and returns its id"""
-    response = rds_hook.conn.create_db_cluster(
+    response = rds_hook.get_conn().create_db_cluster(
         DBClusterIdentifier="testrdshook-db-cluster",
         Engine="postgres",
         MasterUsername="testrdshook",
         MasterUserPassword="testrdshook",
-        DBClusterInstanceClass="db.t4g.micro",
-        AllocatedStorage=20,
     )
     return response["DBCluster"]["DBClusterIdentifier"]
 
@@ -132,6 +130,7 @@ class TestRdsHook:
 
     def test_conn_attribute(self):
         hook = RdsHook(aws_conn_id="aws_default", region_name="us-east-1")
+
         assert hasattr(hook, "conn")
         assert hook.conn.__class__.__name__ == "RDS"
         conn = hook.conn
@@ -142,6 +141,7 @@ class TestRdsHook:
         response = rds_hook.conn.describe_db_instances(DBInstanceIdentifier=db_instance_id)
         state_expected = response["DBInstances"][0]["DBInstanceStatus"]
         state_actual = rds_hook.get_db_instance_state(db_instance_id)
+
         assert state_actual == state_expected
 
     def test_wait_for_db_instance_state_boto_waiters(self, rds_hook: RdsHook, db_instance_id: str):
@@ -149,6 +149,7 @@ class TestRdsHook:
         for state in ("available", "deleted"):
             with patch.object(rds_hook.conn, "get_waiter") as mock:
                 rds_hook.wait_for_db_instance_state(db_instance_id, target_state=state, **self.waiter_args)
+
                 mock.assert_called_once_with(f"db_instance_{state}")
                 mock.return_value.wait.assert_called_once_with(
                     DBInstanceIdentifier=db_instance_id,
@@ -172,6 +173,7 @@ class TestRdsHook:
         response = rds_hook.conn.describe_db_clusters(DBClusterIdentifier=db_cluster_id)
         state_expected = response["DBClusters"][0]["Status"]
         state_actual = rds_hook.get_db_cluster_state(db_cluster_id)
+
         assert state_actual == state_expected
 
     def test_wait_for_db_cluster_state_boto_waiters(self, rds_hook: RdsHook, db_cluster_id: str):
@@ -179,6 +181,7 @@ class TestRdsHook:
         for state in ("available", "deleted"):
             with patch.object(rds_hook.conn, "get_waiter") as mock:
                 rds_hook.wait_for_db_cluster_state(db_cluster_id, target_state=state, **self.waiter_args)
+
                 mock.assert_called_once_with(f"db_cluster_{state}")
                 mock.return_value.wait.assert_called_once_with(
                     DBClusterIdentifier=db_cluster_id,
@@ -202,6 +205,7 @@ class TestRdsHook:
         response = rds_hook.conn.describe_db_snapshots(DBSnapshotIdentifier=db_snapshot_id)
         state_expected = response["DBSnapshots"][0]["Status"]
         state_actual = rds_hook.get_db_snapshot_state(db_snapshot_id)
+
         assert state_actual == state_expected
 
     def test_get_db_snapshot_state_not_found(self, rds_hook: RdsHook):
@@ -213,6 +217,7 @@ class TestRdsHook:
         for state in ("available", "deleted", "completed"):
             with patch.object(rds_hook.conn, "get_waiter") as mock:
                 rds_hook.wait_for_db_snapshot_state(db_snapshot_id, target_state=state, **self.waiter_args)
+
                 mock.assert_called_once_with(f"db_snapshot_{state}")
                 mock.return_value.wait.assert_called_once_with(
                     DBSnapshotIdentifier=db_snapshot_id,
@@ -238,6 +243,7 @@ class TestRdsHook:
         )
         state_expected = response["DBClusterSnapshots"][0]["Status"]
         state_actual = rds_hook.get_db_cluster_snapshot_state(db_cluster_snapshot_id)
+
         assert state_actual == state_expected
 
     def test_get_db_cluster_snapshot_state_not_found(self, rds_hook: RdsHook):
@@ -253,6 +259,7 @@ class TestRdsHook:
                 rds_hook.wait_for_db_cluster_snapshot_state(
                     db_cluster_snapshot_id, target_state=state, **self.waiter_args
                 )
+
                 mock.assert_called_once_with(f"db_cluster_snapshot_{state}")
                 mock.return_value.wait.assert_called_once_with(
                     DBClusterSnapshotIdentifier=db_cluster_snapshot_id,
@@ -285,6 +292,7 @@ class TestRdsHook:
         response = rds_hook.conn.describe_export_tasks(ExportTaskIdentifier=export_task_id)
         state_expected = response["ExportTasks"][0]["Status"]
         state_actual = rds_hook.get_export_task_state(export_task_id)
+
         assert state_actual == state_expected
 
     def test_get_export_task_state_not_found(self, rds_hook: RdsHook):
@@ -307,6 +315,7 @@ class TestRdsHook:
         response = rds_hook.conn.describe_event_subscriptions(SubscriptionName=event_subscription_name)
         state_expected = response["EventSubscriptionsList"][0]["Status"]
         state_actual = rds_hook.get_event_subscription_state(event_subscription_name)
+
         assert state_actual == state_expected
 
     def test_get_event_subscription_state_not_found(self, rds_hook: RdsHook):

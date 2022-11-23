@@ -17,8 +17,10 @@
 # under the License.
 from __future__ import annotations
 
-import unittest
+import logging
 from unittest import mock
+
+import pytest
 
 from airflow.providers.amazon.aws.hooks.glacier import GlacierHook
 
@@ -30,89 +32,71 @@ RESPONSE_BODY = {"body": "data"}
 JOB_STATUS = {"Action": "", "StatusCode": "Succeeded"}
 
 
-class TestAmazonGlacierHook(unittest.TestCase):
-    def setUp(self):
-        with mock.patch("airflow.providers.amazon.aws.hooks.glacier.GlacierHook.__init__", return_value=None):
-            self.hook = GlacierHook(aws_conn_id="aws_default")
+@pytest.fixture
+def mock_conn():
+    with mock.patch.object(GlacierHook, "get_conn") as _get_conn:
+        yield _get_conn.return_value
 
-    @mock.patch("airflow.providers.amazon.aws.hooks.glacier.GlacierHook.get_conn")
+
+class TestAmazonGlacierHook:
     def test_retrieve_inventory_should_return_job_id(self, mock_conn):
-        # Given
         job_id = {"jobId": "1234abcd"}
-        # when
-        mock_conn.return_value.initiate_job.return_value = job_id
-        result = self.hook.retrieve_inventory(VAULT_NAME)
-        # then
-        mock_conn.assert_called_once_with()
+        mock_conn.initiate_job.return_value = job_id
+
+        result = GlacierHook().retrieve_inventory(VAULT_NAME)
+
         assert job_id == result
 
-    @mock.patch("airflow.providers.amazon.aws.hooks.glacier.GlacierHook.get_conn")
-    def test_retrieve_inventory_should_log_mgs(self, mock_conn):
-        # given
+    def test_retrieve_inventory_should_log_mgs(self, mock_conn, caplog):
         job_id = {"jobId": "1234abcd"}
-        # when
-        with self.assertLogs() as log:
-            mock_conn.return_value.initiate_job.return_value = job_id
-            self.hook.retrieve_inventory(VAULT_NAME)
-            # then
-            self.assertEqual(
-                log.output,
-                [
-                    "INFO:airflow.providers.amazon.aws.hooks.glacier.GlacierHook:"
-                    f"Retrieving inventory for vault: {VAULT_NAME}",
-                    "INFO:airflow.providers.amazon.aws.hooks.glacier.GlacierHook:"
-                    f"Initiated inventory-retrieval job for: {VAULT_NAME}",
-                    "INFO:airflow.providers.amazon.aws.hooks.glacier.GlacierHook:"
-                    f"Retrieval Job ID: {job_id.get('jobId')}",
-                ],
-            )
+        mock_conn.initiate_job.return_value = job_id
+        expected_messages = [
+            f"Retrieving inventory for vault: {VAULT_NAME}",
+            f"Initiated inventory-retrieval job for: {VAULT_NAME}",
+            f"Retrieval Job ID: {job_id.get('jobId')}",
+        ]
 
-    @mock.patch("airflow.providers.amazon.aws.hooks.glacier.GlacierHook.get_conn")
+        with caplog.at_level(logging.INFO):
+            GlacierHook().retrieve_inventory(VAULT_NAME)
+        logged_messages = caplog.messages
+
+        assert len(logged_messages) == len(expected_messages)
+        for counter, message in enumerate(logged_messages):
+            assert expected_messages[counter] in message
+
     def test_retrieve_inventory_results_should_return_response(self, mock_conn):
-        # when
-        mock_conn.return_value.get_job_output.return_value = RESPONSE_BODY
-        response = self.hook.retrieve_inventory_results(VAULT_NAME, JOB_ID)
-        # then
-        mock_conn.assert_called_once_with()
+        mock_conn.get_job_output.return_value = RESPONSE_BODY
+
+        response = GlacierHook().retrieve_inventory_results(VAULT_NAME, JOB_ID)
+
         assert response == RESPONSE_BODY
 
-    @mock.patch("airflow.providers.amazon.aws.hooks.glacier.GlacierHook.get_conn")
-    def test_retrieve_inventory_results_should_log_mgs(self, mock_conn):
-        # when
-        with self.assertLogs() as log:
-            mock_conn.return_value.get_job_output.return_value = REQUEST_RESULT
-            self.hook.retrieve_inventory_results(VAULT_NAME, JOB_ID)
-            # then
-            self.assertEqual(
-                log.output,
-                [
-                    "INFO:airflow.providers.amazon.aws.hooks.glacier.GlacierHook:"
-                    f"Retrieving the job results for vault: {VAULT_NAME}...",
-                ],
-            )
+    def test_retrieve_inventory_results_should_log_mgs(self, mock_conn, caplog):
+        mock_conn.get_job_output.return_value = REQUEST_RESULT
 
-    @mock.patch("airflow.providers.amazon.aws.hooks.glacier.GlacierHook.get_conn")
+        with caplog.at_level(logging.INFO):
+            GlacierHook().retrieve_inventory_results(VAULT_NAME, JOB_ID)
+
+        assert len(caplog.messages) == 1
+        assert caplog.messages[0] == f"Retrieving the job results for vault: {VAULT_NAME}..."
+
     def test_describe_job_should_return_status_succeeded(self, mock_conn):
-        # when
-        mock_conn.return_value.describe_job.return_value = JOB_STATUS
-        response = self.hook.describe_job(VAULT_NAME, JOB_ID)
-        # then
-        mock_conn.assert_called_once_with()
+        mock_conn.describe_job.return_value = JOB_STATUS
+
+        response = GlacierHook().describe_job(VAULT_NAME, JOB_ID)
+
         assert response == JOB_STATUS
 
-    @mock.patch("airflow.providers.amazon.aws.hooks.glacier.GlacierHook.get_conn")
-    def test_describe_job_should_log_mgs(self, mock_conn):
-        # when
-        with self.assertLogs() as log:
-            mock_conn.return_value.describe_job.return_value = JOB_STATUS
-            self.hook.describe_job(VAULT_NAME, JOB_ID)
-            # then
-            self.assertEqual(
-                log.output,
-                [
-                    "INFO:airflow.providers.amazon.aws.hooks.glacier.GlacierHook:"
-                    f"Retrieving status for vault: {VAULT_NAME} and job {JOB_ID}",
-                    "INFO:airflow.providers.amazon.aws.hooks.glacier.GlacierHook:"
-                    f"Job status: {JOB_STATUS.get('Action')}, code status: {JOB_STATUS.get('StatusCode')}",
-                ],
-            )
+    def test_describe_job_should_log_mgs(self, mock_conn, caplog):
+        mock_conn.describe_job.return_value = JOB_STATUS
+        expected_messages = [
+            f"Retrieving status for vault: {VAULT_NAME} and job {JOB_ID}",
+            f"Job status: {JOB_STATUS.get('Action')}, code status: {JOB_STATUS.get('StatusCode')}",
+        ]
+
+        with caplog.at_level(logging.INFO):
+            GlacierHook().describe_job(VAULT_NAME, JOB_ID)
+
+        assert len(caplog.messages) == len(expected_messages)
+        for counter, message in enumerate(caplog.messages):
+            assert expected_messages[counter] in message

@@ -31,7 +31,6 @@ class TestLambdaHook:
         assert hook.conn is not None
 
     def test_invoke_lambda_function(self):
-
         hook = LambdaHook(aws_conn_id="aws_default")
 
         with patch.object(hook.conn, "invoke") as mock_invoke:

@@ -16,13 +16,10 @@
 # under the License.
 from __future__ import annotations
 
-import boto3
 import pytest
 from moto import mock_ses
 
 from airflow.providers.amazon.aws.hooks.ses import SesHook
-
-boto3.setup_default_session()
 
 
 @mock_ses
@@ -42,17 +39,14 @@ def test_get_conn():
     "bcc", ["bcc@domain.com", ["bcc1@domain.com", "bcc2@domain.com"], "bcc1@domain.com,bcc2@domain.com"]
 )
 def test_send_email(to, cc, bcc):
-    # Given
     hook = SesHook()
     ses_client = hook.get_conn()
     mail_from = "test_from@domain.com"
-
     # Amazon only allows to send emails from verified addresses,
     # then we need to validate the from address before sending the email,
     # otherwise this test would raise a `botocore.errorfactory.MessageRejected` exception
     ses_client.verify_email_identity(EmailAddress=mail_from)
 
-    # When
     response = hook.send_email(
         mail_from=mail_from,
         to=to,
@@ -64,7 +58,6 @@ def test_send_email(to, cc, bcc):
         return_path="return_path@domain.com",
     )
 
-    # Then
     assert response is not None
     assert isinstance(response, dict)
     assert "MessageId" in response

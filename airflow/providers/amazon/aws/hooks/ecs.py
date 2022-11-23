@@ -112,7 +112,9 @@ class EcsHook(AwsGenericHook):
         return self.conn.describe_clusters(clusters=[cluster_name])["clusters"][0]["status"]
 
     def get_task_definition_state(self, task_definition: str) -> str:
-        return self.conn.describe_task_definition(taskDefinition=task_definition)["taskDefinition"]["status"]
+        return self.conn.describe_task_definition(taskDefinition=task_definition)["taskDefinition"][
+            "status"
+        ]
 
     def get_task_state(self, cluster, task) -> str:
         return self.conn.describe_tasks(cluster=cluster, tasks=[task])["tasks"][0]["lastStatus"]
