@@ -49,7 +49,7 @@ class DmsHook(AwsBaseHook):
 
         :return: Marker and list of replication tasks
         """
-        dms_client = self.get_conn()
+        dms_client = self.conn
         response = dms_client.describe_replication_tasks(**kwargs)
 
         return response.get("Marker"), response.get("ReplicationTasks", [])
@@ -115,7 +115,7 @@ class DmsHook(AwsBaseHook):
         :param migration_type: Migration type ('full-load'|'cdc'|'full-load-and-cdc'), full-load by default.
         :return: Replication task ARN
         """
-        dms_client = self.get_conn()
+        dms_client = self.conn
         create_task_response = dms_client.create_replication_task(
             ReplicationTaskIdentifier=replication_task_id,
             SourceEndpointArn=source_endpoint_arn,
@@ -144,7 +144,7 @@ class DmsHook(AwsBaseHook):
         :param start_replication_task_type: Replication task start type (default='start-replication')
             ('start-replication'|'resume-processing'|'reload-target')
         """
-        dms_client = self.get_conn()
+        dms_client = self.conn
         dms_client.start_replication_task(
             ReplicationTaskArn=replication_task_arn,
             StartReplicationTaskType=start_replication_task_type,
@@ -157,7 +157,7 @@ class DmsHook(AwsBaseHook):
 
         :param replication_task_arn: Replication task ARN
         """
-        dms_client = self.get_conn()
+        dms_client = self.conn
         dms_client.stop_replication_task(ReplicationTaskArn=replication_task_arn)
 
     def delete_replication_task(self, replication_task_arn):
@@ -166,7 +166,7 @@ class DmsHook(AwsBaseHook):
 
         :param replication_task_arn: Replication task ARN
         """
-        dms_client = self.get_conn()
+        dms_client = self.conn
         dms_client.delete_replication_task(ReplicationTaskArn=replication_task_arn)
 
         self.wait_for_task_status(replication_task_arn, DmsTaskWaiterStatus.DELETED)
@@ -182,7 +182,7 @@ class DmsHook(AwsBaseHook):
         if not isinstance(status, DmsTaskWaiterStatus):
             raise TypeError("Status must be an instance of DmsTaskWaiterStatus")
 
-        dms_client = self.get_conn()
+        dms_client = self.conn
         waiter = dms_client.get_waiter(f"replication_task_{status}")
         waiter.wait(
             Filters=[
