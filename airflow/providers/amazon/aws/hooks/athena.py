@@ -91,7 +91,7 @@ class AthenaHook(AwsBaseHook):
         }
         if client_request_token:
             params["ClientRequestToken"] = client_request_token
-        response = self.get_conn().start_query_execution(**params)
+        response = self.conn.start_query_execution(**params)
         return response["QueryExecutionId"]
 
     def check_query_status(self, query_execution_id: str) -> str | None:
@@ -101,7 +101,7 @@ class AthenaHook(AwsBaseHook):
         :param query_execution_id: Id of submitted athena query
         :return: str
         """
-        response = self.get_conn().get_query_execution(QueryExecutionId=query_execution_id)
+        response = self.conn.get_query_execution(QueryExecutionId=query_execution_id)
         state = None
         try:
             state = response["QueryExecution"]["Status"]["State"]
@@ -119,7 +119,7 @@ class AthenaHook(AwsBaseHook):
         :param query_execution_id: Id of submitted athena query
         :return: str
         """
-        response = self.get_conn().get_query_execution(QueryExecutionId=query_execution_id)
+        response = self.conn.get_query_execution(QueryExecutionId=query_execution_id)
         reason = None
         try:
             reason = response["QueryExecution"]["Status"]["StateChangeReason"]
@@ -152,7 +152,7 @@ class AthenaHook(AwsBaseHook):
         result_params = {"QueryExecutionId": query_execution_id, "MaxResults": max_results}
         if next_token_id:
             result_params["NextToken"] = next_token_id
-        return self.get_conn().get_query_results(**result_params)
+        return self.conn.get_query_results(**result_params)
 
     def get_query_results_paginator(
         self,
@@ -187,7 +187,7 @@ class AthenaHook(AwsBaseHook):
                 "StartingToken": starting_token,
             },
         }
-        paginator = self.get_conn().get_paginator("get_query_results")
+        paginator = self.conn.get_paginator("get_query_results")
         return paginator.paginate(**result_params)
 
     def poll_query_status(
@@ -250,7 +250,7 @@ class AthenaHook(AwsBaseHook):
         """
         output_location = None
         if query_execution_id:
-            response = self.get_conn().get_query_execution(QueryExecutionId=query_execution_id)
+            response = self.conn.get_query_execution(QueryExecutionId=query_execution_id)
 
             if response:
                 try:
@@ -272,4 +272,4 @@ class AthenaHook(AwsBaseHook):
         :param query_execution_id: Id of submitted athena query
         :return: dict
         """
-        return self.get_conn().stop_query_execution(QueryExecutionId=query_execution_id)
+        return self.conn.stop_query_execution(QueryExecutionId=query_execution_id)

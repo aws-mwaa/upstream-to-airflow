@@ -16,6 +16,7 @@
 # under the License.
 from __future__ import annotations
 
+import threading
 import unittest
 from datetime import timedelta
 from unittest import mock
@@ -25,18 +26,22 @@ from botocore.exceptions import ClientError
 
 from airflow.providers.amazon.aws.exceptions import EcsOperatorError, EcsTaskFailToStart
 from airflow.providers.amazon.aws.hooks.ecs import EcsHook, EcsTaskLogFetcher, should_retry, should_retry_eni
+from airflow.providers.amazon.aws.hooks.logs import AwsLogsHook
+from tests.providers.amazon.aws.hooks.base_hook_test import BaseHookUnitTest
 
 DEFAULT_CONN_ID: str = "aws_default"
 REGION: str = "us-east-1"
 
+EVENT1 = {"timestamp": 1617400267123, "message": "First"}
+EVENT2 = {"timestamp": 1617400367456, "message": "Second"}
+EVENT3 = {"timestamp": 1617400467789, "message": "Third"}
 
-@pytest.fixture
-def mock_conn():
-    with mock.patch.object(EcsHook, "conn") as _conn:
-        yield _conn
+LOG_EVENTS = [EVENT1, EVENT2, EVENT3]
 
 
-class TestEksHooks:
+@pytest.mark.usefixtures("mock_conn")
+@pytest.mark.parametrize("mock_conn", [EcsHook], indirect=True)
+class TestEcsHooks(BaseHookUnitTest):
     def test_hook(self) -> None:
         hook = EcsHook(region_name=REGION)
         assert hook.conn is not None
@@ -44,15 +49,15 @@ class TestEksHooks:
         assert hook.region_name == REGION
 
     def test_get_cluster_state(self, mock_conn) -> None:
-        mock_conn.describe_clusters.return_value = {"clusters": [{"status": "ACTIVE"}]}
+        mock_conn().describe_clusters.return_value = {"clusters": [{"status": "ACTIVE"}]}
         assert EcsHook().get_cluster_state(cluster_name="cluster_name") == "ACTIVE"
 
     def test_get_task_definition_state(self, mock_conn) -> None:
-        mock_conn.describe_task_definition.return_value = {"taskDefinition": {"status": "ACTIVE"}}
+        mock_conn().describe_task_definition.return_value = {"taskDefinition": {"status": "ACTIVE"}}
         assert EcsHook().get_task_definition_state(task_definition="task_name") == "ACTIVE"
 
     def test_get_task_state(self, mock_conn) -> None:
-        mock_conn.describe_tasks.return_value = {"tasks": [{"lastStatus": "ACTIVE"}]}
+        mock_conn().describe_tasks.return_value = {"tasks": [{"lastStatus": "ACTIVE"}]}
         assert EcsHook().get_task_state(cluster="cluster_name", task="task_name") == "ACTIVE"
 
 
@@ -102,28 +107,17 @@ class TestEcsTaskLogFetcher(unittest.TestCase):
     def setUp(self):
         self.set_up_log_fetcher()
 
-    @mock.patch(
-        "threading.Event.is_set",
-        side_effect=(False, False, False, True),
-    )
-    @mock.patch(
-        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
+    @mock.patch.object(threading.Event, "is_set", side_effect=(False, False, False, True))
+    @mock.patch.object(
+        AwsLogsHook,
+        "get_log_events",
         side_effect=(
-            iter(
-                [
-                    {"timestamp": 1617400267123, "message": "First"},
-                    {"timestamp": 1617400367456, "message": "Second"},
-                ]
-            ),
-            iter(
-                [
-                    {"timestamp": 1617400467789, "message": "Third"},
-                ]
-            ),
+            iter([EVENT1, EVENT2]),
+            iter([EVENT3]),
             iter([]),
         ),
     )
-    def test_run(self, get_log_events_mock, event_is_set_mock):
+    def test_run(self, *_):
 
         self.log_fetcher.run()
 
@@ -135,28 +129,22 @@ class TestEcsTaskLogFetcher(unittest.TestCase):
             ]
         )
 
-    @mock.patch(
-        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
-        side_effect=ClientError({"Error": {"Code": "ResourceNotFoundException"}}, None),
+    @mock.patch.object(
+        AwsLogsHook,
+        "get_log_events",
+        side_effect=ClientError({"Error": {"Code": "ResourceNotFoundException"}}, ""),
     )
-    def test_get_log_events_with_expected_error(self, get_log_events_mock):
+    def test_get_log_events_with_expected_error(self, _):
         with pytest.raises(StopIteration):
             next(self.log_fetcher._get_log_events())
 
-    @mock.patch(
-        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
-        side_effect=Exception(),
-    )
-    def test_get_log_events_with_unexpected_error(self, get_log_events_mock):
+    @mock.patch.object(AwsLogsHook, "get_log_events", side_effect=Exception())
+    def test_get_log_events_with_unexpected_error(self, _):
         with pytest.raises(Exception):
             next(self.log_fetcher._get_log_events())
 
     def test_event_to_str(self):
-        events = [
-            {"timestamp": 1617400267123, "message": "First"},
-            {"timestamp": 1617400367456, "message": "Second"},
-            {"timestamp": 1617400467789, "message": "Third"},
-        ]
+        events = LOG_EVENTS
         assert [self.log_fetcher._event_to_str(event) for event in events] == (
             [
                 "[2021-04-02 21:51:07,123] First",
@@ -165,41 +153,18 @@ class TestEcsTaskLogFetcher(unittest.TestCase):
             ]
         )
 
-    @mock.patch(
-        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
-        return_value=(),
-    )
-    def test_get_last_log_message_with_no_log_events(self, mock_log_events):
+    @mock.patch.object(AwsLogsHook, "get_log_events", return_value=())
+    def test_get_last_log_message_with_no_log_events(self, _):
         assert self.log_fetcher.get_last_log_message() is None
 
-    @mock.patch(
-        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
-        return_value=iter(
-            [
-                {"timestamp": 1617400267123, "message": "First"},
-                {"timestamp": 1617400367456, "message": "Second"},
-            ]
-        ),
-    )
-    def test_get_last_log_message_with_log_events(self, mock_log_events):
-        assert self.log_fetcher.get_last_log_message() == "Second"
+    @mock.patch.object(AwsLogsHook, "get_log_events", return_value=iter(LOG_EVENTS))
+    def test_get_last_log_message_with_log_events(self, _):
+        assert self.log_fetcher.get_last_log_message() == "Third"
 
-    @mock.patch(
-        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
-        return_value=iter(
-            [
-                {"timestamp": 1617400267123, "message": "First"},
-                {"timestamp": 1617400367456, "message": "Second"},
-                {"timestamp": 1617400367458, "message": "Third"},
-            ]
-        ),
-    )
-    def test_get_last_log_messages_with_log_events(self, mock_log_events):
+    @mock.patch.object(AwsLogsHook, "get_log_events", return_value=iter(LOG_EVENTS))
+    def test_get_last_log_messages_with_log_events(self, _):
         assert self.log_fetcher.get_last_log_messages(2) == ["Second", "Third"]
 
-    @mock.patch(
-        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
-        return_value=(),
-    )
-    def test_get_last_log_messages_with_no_log_events(self, mock_log_events):
+    @mock.patch.object(AwsLogsHook, "get_log_events", return_value=())
+    def test_get_last_log_messages_with_no_log_events(self, _):
         assert self.log_fetcher.get_last_log_messages(2) == []
