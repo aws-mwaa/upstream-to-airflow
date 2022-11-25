@@ -49,7 +49,7 @@ class DynamoDBHook(AwsBaseHook):
     def write_batch_data(self, items: Iterable) -> bool:
         """Write batch items to DynamoDB table with provisioned throughout capacity."""
         try:
-            table = self.get_conn().Table(self.table_name)
+            table = self.conn.Table(self.table_name)
 
             with table.batch_writer(overwrite_by_pkeys=self.table_keys) as batch:
                 for item in items:
