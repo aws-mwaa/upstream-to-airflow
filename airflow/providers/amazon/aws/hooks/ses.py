@@ -73,7 +73,7 @@ class SesHook(AwsBaseHook):
             No validations are run on these values and they should be able to be encoded.
         :return: Response from Amazon SES service with unique message identifier.
         """
-        ses_client = self.get_conn()
+        ses_client = self.conn
 
         custom_headers = custom_headers or {}
         if reply_to:
