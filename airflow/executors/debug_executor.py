@@ -42,6 +42,7 @@ class DebugExecutor(BaseExecutor):
     """
 
     _terminated = threading.Event()
+    is_single_threaded = True
 
     def __init__(self):
         super().__init__()
