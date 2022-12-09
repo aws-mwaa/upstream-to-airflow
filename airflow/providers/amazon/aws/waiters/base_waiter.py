@@ -17,9 +17,8 @@
 
 from __future__ import annotations
 
+import boto3
 from botocore.waiter import Waiter, WaiterModel, create_waiter_with_client
-
-from airflow.providers.amazon.aws.hooks.base_aws import BaseAwsConnection
 
 
 class BaseBotoWaiter:
@@ -29,7 +28,7 @@ class BaseBotoWaiter:
     For more details, see airflow/providers/amazon/aws/waiters/README.md
     """
 
-    def __init__(self, client: BaseAwsConnection, model_config: dict) -> None:
+    def __init__(self, client: boto3.client, model_config: dict) -> None:
         self.model = WaiterModel(model_config)
         self.client = client
 
