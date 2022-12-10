@@ -17,19 +17,18 @@
 # under the License.
 from __future__ import annotations
 
-import os
-import boto3
-from pprint import pprint
+from typing import TYPE_CHECKING, Optional
+
 from botocore.exceptions import ClientError
 
+from airflow.providers.amazon.aws.hooks.dynamodb import DynamoDBHook
 from airflow.sensors.base import BaseSensorOperator
-from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from airflow.utils.context import Context
 
 
-class DynamoDBSensor(BaseSensorOperator):
+class DynamoDBValueSensor(BaseSensorOperator):
     """
     Waits for an attribute value to be present for an item in a DynamoDB table.
 
@@ -44,12 +43,13 @@ class DynamoDBSensor(BaseSensorOperator):
     def __init__(
         self,
         table_name: str,
-        partition_key_name=None,
-        partition_key_value=None,
-        attribute_name=None,
-        attribute_value=None,
+        partition_key_name: str,
+        partition_key_value: str,
+        attribute_name: str,
+        attribute_value: str,
         sort_key_name: Optional[str] = None,
         sort_key_value: Optional[str] = None,
+        aws_conn_id: str = "aws_default",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -59,38 +59,27 @@ class DynamoDBSensor(BaseSensorOperator):
         self.attribute_value = attribute_value
         self.sort_key_name = sort_key_name
         self.sort_key_value = sort_key_value
-        self.dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION"))
-        self.table_name = table_name
+        self.aws_conn_id = aws_conn_id
+        self.hook = DynamoDBHook(aws_conn_id=self.aws_conn_id)
+        self.dynamodb = self.hook.conn(table_name=table_name, table_keys=[partition_key_name, partition_key_value])
         self.table = self.dynamodb.Table(table_name)
 
     def poke(self, context: Context) -> bool:
         """Test DynamoDB item for matching attribute value"""
         try:
-            if self.sort_key_name and self.sort_key_value:
-                print(
-                    f"Checking table {self.table_name} for item PK: {self.partition_key_name}={self.partition_key_value} SK: {self.sort_key_name}={self.sort_key_value} attribute: {self.attribute_name}={self.attribute_value}"
-                )
-                response = self.table.get_item(
-                    Key={
-                        self.partition_key_name: self.partition_key_value,
-                        self.sort_key_name: self.sort_key_value,
-                    }
-                )
-            else:
-                print(
-                    f"Checking table {self.table_name} for item PK: {self.partition_key_name}={self.partition_key_value} attribute: {self.attribute_name}={self.attribute_value}"
-                )
-                response = self.table.get_item(Key={self.partition_key_name: self.partition_key_value})
+            key = {self.partition_key_name: self.partition_key_value}
+            msg = f"Checking table {self.table_name} for item PK: {self.partition_key_name}={self.partition_key_value}"
 
-            if not response:
-                return False
-        except ClientError as error:
-            if error.response["Error"]["Code"] == "ResourceNotFoundException":
-                print("Table not found: " + self.table_name)
-                return False
-            else:
-                raise error
+            if self.sort_key_value:
+                key[self.sort_key_name] = self.sort_key_value
+                msg += f" SK: {self.sort_key_name}={self.sort_key_value}"
 
-        pprint(response)
+            msg += " attribute: {self.attribute_name}={self.attribute_value}"
 
-        return response["Item"][self.attribute_name] == self.attribute_value
+            self.log.info(msg)
+            response = self.table.get_item(Key=key)
+            self.log.info(f"Response: {response}")
+            return response["Item"][self.attribute_name] == self.attribute_value
+        except ClientError as ex:
+            self.log.error('AWS request failed, check logs for more info: %s', ex)
+            return False
