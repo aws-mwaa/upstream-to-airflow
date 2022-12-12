@@ -53,6 +53,7 @@ class DynamoDBValueSensor(BaseSensorOperator):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self.table_name = table_name
         self.partition_key_name = partition_key_name
         self.partition_key_value = partition_key_value
         self.attribute_name = attribute_name
@@ -61,8 +62,7 @@ class DynamoDBValueSensor(BaseSensorOperator):
         self.sort_key_value = sort_key_value
         self.aws_conn_id = aws_conn_id
         self.hook = DynamoDBHook(aws_conn_id=self.aws_conn_id)
-        self.dynamodb = self.hook.conn(table_name=table_name, table_keys=[partition_key_name, partition_key_value])
-        self.table = self.dynamodb.Table(table_name)
+        self.table = self.hook.get_conn().Table(table_name)
 
     def poke(self, context: Context) -> bool:
         """Test DynamoDB item for matching attribute value"""
