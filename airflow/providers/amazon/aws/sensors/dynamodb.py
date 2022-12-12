@@ -74,7 +74,7 @@ class DynamoDBValueSensor(BaseSensorOperator):
                 key[self.sort_key_name] = self.sort_key_value
                 msg += f" SK: {self.sort_key_name}={self.sort_key_value}"
 
-            msg += " attribute: {self.attribute_name}={self.attribute_value}"
+            msg += f" attribute: {self.attribute_name}={self.attribute_value}"
 
             self.log.info(msg)
             response = self.table.get_item(Key=key)
