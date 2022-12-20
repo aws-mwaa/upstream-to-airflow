@@ -36,6 +36,7 @@ def _build_methods_map(list) -> dict:
 METHODS_MAP = _build_methods_map(
     [
         DagFileProcessor.update_import_errors,
+        DagFileProcessor.manage_slas,
     ]
 )
 
