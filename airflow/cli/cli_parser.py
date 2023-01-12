@@ -37,6 +37,7 @@ from airflow.cli.cli_config import (
     GroupCommand,
 )
 from airflow.exceptions import AirflowException
+from airflow.executors.executor_loader import ExecutorLoader
 from airflow.utils.helpers import partition
 
 
@@ -47,7 +48,15 @@ def get_parser(dag_parser: bool = False) -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="subcommand", metavar="GROUP_OR_COMMAND")
     subparsers.required = True
 
-    command_dict = DAG_CLI_DICT if dag_parser else ALL_COMMANDS_DICT
+    if dag_parser:
+        command_dict = DAG_CLI_DICT
+    else:
+        command_dict = ALL_COMMANDS_DICT
+        executor, _ = ExecutorLoader.import_default_executor_cls()
+        # Add any group commands from executors into the dict of commands from the base config
+        for group_command in executor.get_cli_group_commands():
+            command_dict[group_command.name] = group_command
+
     subparser_list = command_dict.keys()
     sub_name: str
     for sub_name in sorted(subparser_list):
