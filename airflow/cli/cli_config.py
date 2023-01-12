@@ -1901,9 +1901,6 @@ airflow_commands: list[CLICommand] = [
         subcommands=DAGS_COMMANDS,
     ),
     GroupCommand(
-        name="kubernetes", help="Tools to help run the KubernetesExecutor", subcommands=KUBERNETES_COMMANDS
-    ),
-    GroupCommand(
         name="tasks",
         help="Manage tasks",
         subcommands=TASKS_COMMANDS,
