@@ -38,7 +38,19 @@ from kubernetes.client import Configuration, models as k8s
 from kubernetes.client.rest import ApiException
 from urllib3.exceptions import ReadTimeoutError
 
-from airflow.configuration import conf
+from airflow import configuration as conf
+from airflow.cli.cli_config import (
+    ARG_DAG_ID,
+    ARG_EXECUTION_DATE,
+    ARG_OUTPUT_PATH,
+    ARG_SUBDIR,
+    ARG_VERBOSE,
+    ActionCommand,
+    Arg,
+    GroupCommand,
+    lazy_load_command,
+    positive_int,
+)
 from airflow.exceptions import AirflowException, PodMutationHookException, PodReconciliationError
 from airflow.executors.base_executor import BaseExecutor, CommandType
 from airflow.kubernetes import pod_generator
@@ -456,6 +468,45 @@ def get_base_pod_from_template(pod_template_file: str | None, kube_config: Any) 
         return PodGenerator.deserialize_model_file(pod_template_file)
     else:
         return PodGenerator.deserialize_model_file(kube_config.pod_template_file)
+
+
+# CLI Args
+ARG_NAMESPACE = Arg(
+    ("--namespace",),
+    default=conf.get("kubernetes_executor", "namespace"),
+    help="Kubernetes Namespace. Default value is `[kubernetes] namespace` in configuration.",
+)
+
+ARG_MIN_PENDING_MINUTES = Arg(
+    ("--min-pending-minutes",),
+    default=30,
+    type=positive_int(allow_zero=False),
+    help=(
+        "Pending pods created before the time interval are to be cleaned up, "
+        "measured in minutes. Default value is 30(m). The minimum value is 5(m)."
+    ),
+)
+
+# CLI Commands
+KUBERNETES_COMMANDS = (
+    ActionCommand(
+        name="cleanup-pods",
+        help=(
+            "Clean up Kubernetes pods "
+            "(created by KubernetesExecutor/KubernetesPodOperator) "
+            "in evicted/failed/succeeded/pending states"
+        ),
+        func=lazy_load_command("airflow.cli.commands.kubernetes_command.cleanup_pods"),
+        args=(ARG_NAMESPACE, ARG_MIN_PENDING_MINUTES, ARG_VERBOSE),
+    ),
+    ActionCommand(
+        name="generate-dag-yaml",
+        help="Generate YAML files for all tasks in DAG. Useful for debugging tasks without "
+        "launching into a cluster",
+        func=lazy_load_command("airflow.cli.commands.kubernetes_command.generate_pod_yaml"),
+        args=(ARG_DAG_ID, ARG_EXECUTION_DATE, ARG_SUBDIR, ARG_OUTPUT_PATH, ARG_VERBOSE),
+    ),
+)
 
 
 class KubernetesExecutor(BaseExecutor):
@@ -979,3 +1030,13 @@ class KubernetesExecutor(BaseExecutor):
 
     def terminate(self):
         """Terminate the executor is not doing anything."""
+
+    @staticmethod
+    def get_cli_commands() -> list:
+        return [
+            GroupCommand(
+                name="kubernetes",
+                help="Tools to help run the KubernetesExecutor",
+                subcommands=KUBERNETES_COMMANDS,
+            )
+        ]

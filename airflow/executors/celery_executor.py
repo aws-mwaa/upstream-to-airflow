@@ -46,6 +46,22 @@ from setproctitle import setproctitle
 from sqlalchemy.orm.session import Session
 
 import airflow.settings as settings
+from airflow.cli.cli_config import (
+    ARG_AUTOSCALE,
+    ARG_DAEMON,
+    ARG_LOG_FILE,
+    ARG_PID,
+    ARG_SKIP_SERVE_LOGS,
+    ARG_STDERR,
+    ARG_STDOUT,
+    ARG_VERBOSE,
+    ARG_WITHOUT_GOSSIP,
+    ARG_WITHOUT_MINGLE,
+    ActionCommand,
+    Arg,
+    GroupCommand,
+    lazy_load_command,
+)
 from airflow.config_templates.default_celery import DEFAULT_CELERY_CONFIG
 from airflow.configuration import conf
 from airflow.exceptions import AirflowException, AirflowTaskTimeout
@@ -214,6 +230,104 @@ def on_celery_import_modules(*args, **kwargs):
 class _CeleryPendingTaskTimeoutType(Enum):
     ADOPTED = 1
     STALLED = 2
+
+
+# flower cli args
+ARG_BROKER_API = Arg(("-a", "--broker-api"), help="Broker API")
+ARG_FLOWER_HOSTNAME = Arg(
+    ("-H", "--hostname"),
+    default=conf.get("celery", "FLOWER_HOST"),
+    help="Set the hostname on which to run the server",
+)
+ARG_FLOWER_PORT = Arg(
+    ("-p", "--port"),
+    default=conf.get("celery", "FLOWER_PORT"),
+    type=int,
+    help="The port on which to run the server",
+)
+ARG_FLOWER_CONF = Arg(("-c", "--flower-conf"), help="Configuration file for flower")
+ARG_FLOWER_URL_PREFIX = Arg(
+    ("-u", "--url-prefix"), default=conf.get("celery", "FLOWER_URL_PREFIX"), help="URL prefix for Flower"
+)
+ARG_FLOWER_BASIC_AUTH = Arg(
+    ("-A", "--basic-auth"),
+    default=conf.get("celery", "FLOWER_BASIC_AUTH"),
+    help=(
+        "Securing Flower with Basic Authentication. "
+        "Accepts user:password pairs separated by a comma. "
+        "Example: flower_basic_auth = user1:password1,user2:password2"
+    ),
+)
+
+# worker cli args
+ARG_QUEUES = Arg(
+    ("-q", "--queues"),
+    help="Comma delimited list of queues to serve",
+    default=conf.get("operators", "DEFAULT_QUEUE"),
+)
+ARG_CONCURRENCY = Arg(
+    ("-c", "--concurrency"),
+    type=int,
+    help="The number of worker processes",
+    default=conf.get("celery", "worker_concurrency"),
+)
+ARG_CELERY_HOSTNAME = Arg(
+    ("-H", "--celery-hostname"),
+    help="Set the hostname of celery worker if you have multiple workers on a single machine",
+)
+ARG_UMASK = Arg(
+    ("-u", "--umask"),
+    help="Set the umask of celery worker in daemon mode",
+)
+
+CELERY_COMMANDS = (
+    ActionCommand(
+        name="worker",
+        help="Start a Celery worker node",
+        func=lazy_load_command("airflow.cli.commands.celery_command.worker"),
+        args=(
+            ARG_QUEUES,
+            ARG_CONCURRENCY,
+            ARG_CELERY_HOSTNAME,
+            ARG_PID,
+            ARG_DAEMON,
+            ARG_UMASK,
+            ARG_STDOUT,
+            ARG_STDERR,
+            ARG_LOG_FILE,
+            ARG_AUTOSCALE,
+            ARG_SKIP_SERVE_LOGS,
+            ARG_WITHOUT_MINGLE,
+            ARG_WITHOUT_GOSSIP,
+            ARG_VERBOSE,
+        ),
+    ),
+    ActionCommand(
+        name="flower",
+        help="Start a Celery Flower",
+        func=lazy_load_command("airflow.cli.commands.celery_command.flower"),
+        args=(
+            ARG_FLOWER_HOSTNAME,
+            ARG_FLOWER_PORT,
+            ARG_FLOWER_CONF,
+            ARG_FLOWER_URL_PREFIX,
+            ARG_FLOWER_BASIC_AUTH,
+            ARG_BROKER_API,
+            ARG_PID,
+            ARG_DAEMON,
+            ARG_STDOUT,
+            ARG_STDERR,
+            ARG_LOG_FILE,
+            ARG_VERBOSE,
+        ),
+    ),
+    ActionCommand(
+        name="stop",
+        help="Stop the Celery worker gracefully",
+        func=lazy_load_command("airflow.cli.commands.celery_command.stop_worker"),
+        args=(ARG_PID, ARG_VERBOSE),
+    ),
+)
 
 
 class CeleryExecutor(BaseExecutor):
@@ -554,6 +668,20 @@ class CeleryExecutor(BaseExecutor):
             self.adopted_task_timeouts[key] = utcnow() + self.task_adoption_timeout
         elif timeout_type == _CeleryPendingTaskTimeoutType.STALLED and self.stalled_task_timeout:
             self.stalled_task_timeouts[key] = utcnow() + self.stalled_task_timeout
+
+    @staticmethod
+    def get_cli_commands() -> list:
+        return [
+            GroupCommand(
+                name="celery",
+                help="Celery components",
+                description=(
+                    "Start celery components. Works only when using CeleryExecutor. For more information, "
+                    "see https://airflow.apache.org/docs/apache-airflow/stable/executor/celery.html"
+                ),
+                subcommands=CELERY_COMMANDS,
+            ),
+        ]
 
 
 def fetch_celery_task_state(async_result: AsyncResult) -> tuple[str, str | ExceptionWithTraceback, Any]:
