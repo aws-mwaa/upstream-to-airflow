@@ -41,9 +41,12 @@ from airflow.cli.cli_config import (
     core_commands,
 )
 from airflow.exceptions import AirflowException
+from airflow.executors.executor_loader import ExecutorLoader
 from airflow.utils.helpers import partition
 
 airflow_commands = core_commands
+for executor in ExecutorLoader.import_all_executor_classes():
+    airflow_commands.extend(executor.get_cli_commands())
 
 ALL_COMMANDS_DICT: dict[str, CLICommand] = {sp.name: sp for sp in airflow_commands}
 
