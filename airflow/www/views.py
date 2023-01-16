@@ -264,18 +264,18 @@ def dag_to_grid(dag: DagModel, dag_runs: Sequence[DagRun], session: Session):
             TaskInstance.task_id,
             TaskInstance.run_id,
             TaskInstance.state,
+            TaskInstance._try_number,
             func.min(TaskInstanceNote.content).label("note"),
             func.count(func.coalesce(TaskInstance.state, sqla.literal("no_status"))).label("state_count"),
             func.min(TaskInstance.start_date).label("start_date"),
             func.max(TaskInstance.end_date).label("end_date"),
-            func.max(TaskInstance._try_number).label("_try_number"),
         )
         .join(TaskInstance.task_instance_note, isouter=True)
         .filter(
             TaskInstance.dag_id == dag.dag_id,
             TaskInstance.run_id.in_([dag_run.run_id for dag_run in dag_runs]),
         )
-        .group_by(TaskInstance.task_id, TaskInstance.run_id, TaskInstance.state)
+        .group_by(TaskInstance.task_id, TaskInstance.run_id, TaskInstance.state, TaskInstance._try_number)
         .order_by(TaskInstance.task_id, TaskInstance.run_id)
     )
 
@@ -285,19 +285,13 @@ def dag_to_grid(dag: DagModel, dag_runs: Sequence[DagRun], session: Session):
         if isinstance(item, AbstractOperator):
 
             def _get_summary(task_instance):
-                try_count = (
-                    task_instance._try_number
-                    if task_instance._try_number != 0 or task_instance.state in State.running
-                    else task_instance._try_number + 1
-                )
-
                 return {
                     "task_id": task_instance.task_id,
                     "run_id": task_instance.run_id,
                     "state": task_instance.state,
                     "start_date": task_instance.start_date,
                     "end_date": task_instance.end_date,
-                    "try_number": try_count,
+                    "try_number": wwwutils.get_try_count(task_instance._try_number, task_instance.state),
                     "note": task_instance.note,
                 }
 
@@ -775,15 +769,9 @@ class Airflow(AirflowBaseView):
 
             dags = current_dags.options(joinedload(DagModel.tags)).offset(start).limit(dags_per_page).all()
             user_permissions = g.user.perms
-            all_dags_editable = (permissions.ACTION_CAN_EDIT, permissions.RESOURCE_DAG) in user_permissions
             can_create_dag_run = (
                 permissions.ACTION_CAN_CREATE,
                 permissions.RESOURCE_DAG_RUN,
-            ) in user_permissions
-
-            all_dags_deletable = (
-                permissions.ACTION_CAN_DELETE,
-                permissions.RESOURCE_DAG,
             ) in user_permissions
 
             dataset_triggered_dag_ids = {dag.dag_id for dag in dags if dag.schedule_interval == "Dataset"}
@@ -795,16 +783,9 @@ class Airflow(AirflowBaseView):
                 dataset_triggered_next_run_info = {}
 
             for dag in dags:
-                dag_resource_name = permissions.RESOURCE_DAG_PREFIX + dag.dag_id
-                if all_dags_editable:
-                    dag.can_edit = True
-                else:
-                    dag.can_edit = (permissions.ACTION_CAN_EDIT, dag_resource_name) in user_permissions
+                dag.can_edit = get_airflow_app().appbuilder.sm.can_edit_dag(dag.dag_id, g.user)
                 dag.can_trigger = dag.can_edit and can_create_dag_run
-                if all_dags_deletable:
-                    dag.can_delete = True
-                else:
-                    dag.can_delete = (permissions.ACTION_CAN_DELETE, dag_resource_name) in user_permissions
+                dag.can_delete = get_airflow_app().appbuilder.sm.can_delete_dag(dag.dag_id, g.user)
 
             dagtags = session.query(func.distinct(DagTag.name)).all()
             tags = [
@@ -1596,10 +1577,7 @@ class Airflow(AirflowBaseView):
 
         num_logs = 0
         if ti is not None:
-            num_logs = ti.next_try_number - 1
-            if ti.state in (State.UP_FOR_RESCHEDULE, State.DEFERRED):
-                # Tasks in reschedule state decremented the try number
-                num_logs += 1
+            num_logs = wwwutils.get_try_count(ti._try_number, ti.state)
         logs = [""] * num_logs
         root = request.args.get("root", "")
         return self.render_template(
@@ -3929,61 +3907,58 @@ class ConfigurationView(AirflowBaseView):
         """Shows configuration."""
         raw = request.args.get("raw") == "true"
         title = "Airflow Configuration"
-        subtitle = AIRFLOW_CONFIG
+        expose_config = conf.get("webserver", "expose_config").lower()
 
-        expose_config = conf.get("webserver", "expose_config")
-
-        # Don't show config when expose_config variable is False in airflow config
-        # Don't show sensitive config values if expose_config variable is 'non-sensitive-only'
-        # in airflow config
-        if expose_config.lower() == "non-sensitive-only":
-            from airflow.configuration import SENSITIVE_CONFIG_VALUES
-
-            updater = configupdater.ConfigUpdater()
-            updater.read(AIRFLOW_CONFIG)
-            for sect, key in SENSITIVE_CONFIG_VALUES:
-                if updater.has_option(sect, key):
-                    updater[sect][key].value = "< hidden >"
-            config = str(updater)
-
-            table = [
-                (section, key, str(value), source)
-                for section, parameters in conf.as_dict(True, False).items()
-                for key, (value, source) in parameters.items()
-            ]
-        elif expose_config.lower() in ["true", "t", "1"]:
-
-            with open(AIRFLOW_CONFIG) as file:
-                config = file.read()
-            table = [
-                (section, key, str(value), source)
-                for section, parameters in conf.as_dict(True, True).items()
-                for key, (value, source) in parameters.items()
-            ]
-        else:
-            config = (
-                "# Your Airflow administrator chose not to expose the "
-                "configuration, most likely for security reasons."
-            )
-            table = None
-
+        # TODO remove "if raw" usage in Airflow 3.0. Configuration can be fetched via the REST API.
         if raw:
-            return Response(response=config, status=200, mimetype="application/text")
-        else:
-            code_html = Markup(
-                highlight(
-                    config,
-                    lexers.IniLexer(),  # Lexer call
-                    HtmlFormatter(noclasses=True),
+            if expose_config == "non-sensitive-only":
+                from airflow.configuration import SENSITIVE_CONFIG_VALUES
+
+                updater = configupdater.ConfigUpdater()
+                updater.read(AIRFLOW_CONFIG)
+                for sect, key in SENSITIVE_CONFIG_VALUES:
+                    if updater.has_option(sect, key):
+                        updater[sect][key].value = "< hidden >"
+                config = str(updater)
+            elif expose_config in {"true", "t", "1"}:
+                with open(AIRFLOW_CONFIG) as file:
+                    config = file.read()
+            else:
+                config = (
+                    "# Your Airflow administrator chose not to expose the configuration, "
+                    "most likely for security reasons."
                 )
+
+            return Response(
+                response=config,
+                status=200,
+                mimetype="application/text",
+                headers={"Deprecation": "Endpoint will be removed in Airflow 3.0, use the REST API instead."},
             )
+
+        if expose_config in {"non-sensitive-only", "true", "t", "1"}:
+            display_sensitive = expose_config != "non-sensitive-only"
+
+            table = [
+                (section, key, str(value), source)
+                for section, parameters in conf.as_dict(True, display_sensitive).items()
+                for key, (value, source) in parameters.items()
+            ]
+
+            return self.render_template(
+                template="airflow/config.html",
+                title=title,
+                table=table,
+            )
+
+        else:
             return self.render_template(
                 "airflow/config.html",
-                pre_subtitle=settings.HEADER + "  v" + airflow.__version__,
-                code_html=code_html,
                 title=title,
-                subtitle=subtitle,
-                table=table,
+                hide_config_msg=(
+                    "Your Airflow administrator chose not to expose the configuration, "
+                    "most likely for security reasons."
+                ),
             )
 
 
