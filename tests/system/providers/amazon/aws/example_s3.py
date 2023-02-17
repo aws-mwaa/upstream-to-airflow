@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from airflow.decorators import task
 from airflow.models.baseoperator import chain
 from airflow.models.dag import DAG
 from airflow.operators.python import BranchPythonOperator
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.amazon.aws.operators.s3 import (
     S3CopyObjectOperator,
     S3CreateBucketOperator,
@@ -54,6 +56,12 @@ PREFIX = ""
 DELIMITER = "/"
 TAG_KEY = "test-s3-bucket-tagging-key"
 TAG_VALUE = "test-s3-bucket-tagging-value"
+
+
+@task
+def await_bucket(_bucket_name: str) -> None:
+    S3Hook().get_waiter("bucket_exists").wait(Bucket=_bucket_name)
+
 
 with DAG(
     dag_id=DAG_ID,
@@ -247,6 +255,7 @@ with DAG(
         test_context,
         # TEST BODY
         create_bucket,
+        await_bucket(bucket_name),
         create_bucket_2,
         put_tagging,
         get_tagging,
