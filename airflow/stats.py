@@ -23,10 +23,19 @@ import logging
 import socket
 import string
 import time
+import warnings
 from functools import partial, wraps
-from typing import TYPE_CHECKING, Callable, Iterable, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, Iterable, TypeVar, Union, cast
 
 from datadog import DogStatsd
+from opentelemetry import metrics
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.metrics import Instrument
+from opentelemetry.sdk import util
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics._internal.measurement import Measurement
+from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from statsd import StatsClient
 
 from airflow.configuration import conf
@@ -34,6 +43,7 @@ from airflow.exceptions import AirflowConfigException, InvalidStatsNameException
 from airflow.typing_compat import Protocol
 
 log = logging.getLogger(__name__)
+DeltaType = Union[int, float, datetime.timedelta]
 
 
 class TimerProtocol(Protocol):
@@ -95,7 +105,7 @@ class StatsLogger(Protocol):
     def timing(
         cls,
         stat: str,
-        dt: int | float | datetime.timedelta,
+        dt: DeltaType | None,
         *,
         tags: dict[str, str] | None = None,
     ) -> None:
@@ -331,9 +341,7 @@ class NoStatsLogger:
         """Gauge stat."""
 
     @classmethod
-    def timing(
-        cls, stat: str, dt: int | float | datetime.timedelta, *, tags: dict[str, str] | None = None
-    ) -> None:
+    def timing(cls, stat: str, dt: DeltaType, *, tags: dict[str, str] | None = None) -> None:
         """Stats timing."""
 
     @classmethod
@@ -408,7 +416,7 @@ class SafeStatsdLogger:
     def timing(
         self,
         stat: str,
-        dt: int | float | datetime.timedelta,
+        dt: DeltaType,
         *,
         tags: dict[str, str] | None = None,
     ) -> None:
@@ -512,7 +520,7 @@ class SafeDogStatsdLogger:
     def timing(
         self,
         stat: str,
-        dt: int | float | datetime.timedelta,
+        dt: DeltaType,
         *,
         tags: dict[str, str] | None = None,
     ) -> None:
@@ -548,6 +556,145 @@ class SafeDogStatsdLogger:
         return Timer()
 
 
+class SafeOtelLogger:
+    """Otel Logger"""
+
+    def __init__(self, otel_provider, prefix: str = "airflow", allow_list_validator=AllowListValidator()):
+        self.otel: Callable = otel_provider
+        self.prefix: str = prefix
+        self.allow_list_validator = allow_list_validator
+        self.meter = otel_provider.get_meter(__name__)
+        self.counter_map = CounterMap(self.meter)
+        self.gauge_map = GaugeMap(self.meter)
+        self.meter.create_observable_gauge(name="airflow", callbacks=[self.gauge_map.get_readings])
+
+    @validate_stat
+    def incr(self, stat: str, count: int = 1, rate: float = 1, tags: dict[str, str] | None = None):
+        """Increment stat"""
+        value = count * rate
+        warnings.warn(f"*** INCREMENTING {stat}:\t{value}")
+
+        if self.allow_list_validator.test(stat):
+            counter = self.counter_map.get_counter(f"{self.prefix}.{stat}")
+            return counter.add(value, attributes=tags)
+
+    @validate_stat
+    def decr(self, stat: str, count: int = 1, rate: float = 1, tags: dict[str, str] | None = None):
+        """Decrement stat"""
+        value = -1 * (count * rate)
+        warnings.warn(f"*** DECREMENTING {stat}:\t{value}")
+
+        if self.allow_list_validator.test(stat):
+            counter = self.counter_map.get_counter(f"{self.prefix}.{stat}")
+            return counter.add(value, attributes=tags)
+
+    @validate_stat
+    def gauge(
+        self,
+        stat: str,
+        value: int,
+        tags: dict[str, str] | None = None,
+    ):
+        """Gauge stat"""
+        # warnings.warn(f"****** UPDATING GAUGE ******\n{stat}:\t{value}")
+        if self.allow_list_validator.test(stat):
+            self.gauge_map.set_value(f"{self.prefix}.{stat}", value, attributes=tags)
+
+    @validate_stat
+    def timing(self, stat: str, dt: DeltaType, tags: dict[str, str] | None = None):
+        """Stats timing"""
+        warnings.warn(f"*** UPDATE TIMER {stat}:\t{dt}")
+        if self.allow_list_validator.test(stat):
+            if isinstance(dt, datetime.timedelta):
+                dt = dt.total_seconds()
+            self.gauge_map.set_value(f"{self.prefix}.{stat}", value=dt, attributes=tags)
+
+    @validate_stat
+    def timer(self, stat: str | None = None, attributes: dict[str, str] | None = None, *args, **kwargs):
+        """Timer metric that can be cancelled"""
+        return Timer()
+
+
+class BaseInstrument(Instrument):
+    """Instrument clss is abstract and must be implemented."""
+
+    def __init__(
+        self, name: str, unit: str = "", description: str = "", attributes: dict[str, str] | None = None
+    ):
+        self.name: str = name
+        self.unit: str = unit
+        self.description: str = description
+        self.attributes: dict[str, str] | None = attributes
+
+
+class CounterMap:
+    """Stores Otel Counters."""
+
+    def __init__(self, meter):
+        self.meter = meter
+        self.map = {}
+
+    def clear(self) -> None:
+        self.map.clear()
+
+    def get_counter(self, name: str, attributes: dict[str, str] | None = None):
+        """Returns the value of the counter or creates a new one if it does not exist."""
+        key: str = name + str(attributes)
+        if key in self.map.keys():
+            # print("returning counter with " + key)
+            return self.map[key]
+        else:
+            print("--> creating counter with " + key)
+            # TODO:  Do Better for 63-char max
+            counter = self.meter.create_up_down_counter(name if len(name) < 64 else name[:63])
+            self.map[key] = counter
+            return counter
+
+    def del_counter(self, name: str, attributes: dict[str, str] | None = None) -> None:
+        key: str = name + str(attributes)
+        if key in self.map.keys():
+            del self.map[key]
+
+
+class GaugeMap:
+    """Stores OTel Gauges."""
+
+    def __init__(self, meter):
+        self.meter = meter
+        self.map = {}
+
+    def clear(self) -> None:
+        self.map.clear()
+
+    def set_value(
+        self,
+        name: str,
+        value: int | float,
+        unit: str = "",
+        description: str = "",
+        attributes: dict[str, str] | None = None,
+    ) -> None:
+        """Overwrites the value of the gauge or creates a new one if it does not exist."""
+        if not attributes:
+            attributes = {}
+
+        key = name + str(util.get_dict_as_key(attributes))
+        self.map[key] = Measurement(value, BaseInstrument(name, unit, description), attributes)
+
+    def get_readings(self, callback_options) -> Iterable[Measurement]:
+        """Returns and clears gauge readings."""
+        readings = self.poke_readings()
+        self.clear()
+        return readings
+
+    def poke_readings(self) -> Iterable[Measurement]:
+        """Returns gauge readings without clearing them."""
+        readings = []
+        for val in self.map.values():
+            readings.append(val)
+        return readings
+
+
 class _Stats(type):
     factory: Callable
     instance: StatsLogger | NoStatsLogger | None = None
@@ -569,6 +716,8 @@ class _Stats(type):
                 cls.__class__.factory = cls.get_dogstatsd_logger
             elif conf.getboolean("metrics", "statsd_on"):
                 cls.__class__.factory = cls.get_statsd_logger
+            elif conf.getboolean("metrics", "otel_on"):
+                cls.__class__.factory = cls.get_otel_logger
             else:
                 cls.__class__.factory = NoStatsLogger
 
@@ -639,6 +788,62 @@ class _Stats(type):
         datadog_metrics_tags = conf.getboolean("metrics", "statsd_datadog_metrics_tags", fallback=True)
         metric_tags_validator = BlockListValidator(conf.get("metrics", "statsd_disabled_tags", fallback=None))
         return SafeDogStatsdLogger(dogstatsd, metrics_validator, datadog_metrics_tags, metric_tags_validator)
+
+    @classmethod
+    def get_otel_logger(cls):
+        """Get Otel logger"""
+        host = conf.get("metrics", "otel_host")  # ex: "breeze-otel-collector"
+        port = conf.getint("metrics", "otel_port")  # ex: 4318
+        prefix = conf.get("metrics", "otel_prefix")  # ex: "airflow"
+        interval = conf.getint("metrics", "otel_interval_millis")  # ex: 30000
+
+        # TODO replace existing statsd_allow_list with metrics_allow_list??
+        allow_list = conf.get("metrics", "statsd_allow_list", fallback=None)
+        allow_list_validator = AllowListValidator(allow_list)
+
+        resource = Resource(attributes={SERVICE_NAME: "Airflow"})
+        # TODO:  figure out https instead of http ??
+        endpoint = f"http://{host}:{port}/v1/metrics"
+
+        print(f"[Metric Exporter] Connecting to OTLP at ---> {endpoint}")
+        readers = [
+            PeriodicExportingMetricReader(
+                OTLPMetricExporter(
+                    endpoint=endpoint,
+                    headers={"Content-Type": "application/json"},
+                ),
+                export_interval_millis=interval,
+            )
+        ]
+
+        # TODO:  remove console exporter
+        debug = False
+        if debug:
+            export_to_console = PeriodicExportingMetricReader(ConsoleMetricExporter())
+            readers.append(export_to_console)
+
+        metrics.set_meter_provider(
+            MeterProvider(
+                resource=resource,
+                metric_readers=readers,
+                shutdown_on_exit=False,
+            ),
+        )
+        # TODO:  I like the metrics.foo() here for clarity, but maybe import these directly?
+
+        return SafeOtelLogger(metrics.get_meter_provider(), prefix, allow_list_validator)
+        # -----------------------------------------------------------------------------------------
+
+        # -----------------------------------------------------------------------------------------
+        # TODO:  the following comment is copypasta from POC2 and not confirmed
+        # if we do not set 'shutdown_on_exit' to False, somehow(?) the
+        # MeterProvider will constantly get shutdown every second
+        # something having to do with the following code:
+        # if shutdown_on_exit:
+        #     self._atexit_handler = register(self.shutdown)
+        # not sure why...
+        # metrics.set_meter_provider(MeterProvider(metric_readers=[reader], shutdown_on_exit=False))
+        # -----------------------------------------------------------------------------------------
 
     @classmethod
     def get_constant_tags(cls) -> list[str]:
