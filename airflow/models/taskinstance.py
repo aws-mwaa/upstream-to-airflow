@@ -527,6 +527,7 @@ class TaskInstance(Base, LoggingMixin):
                     ) from None
 
         self.run_id = run_id
+        self.stat_tags = {"dag_id": self.dag_id, "run_id": str(self.run_id), "task_id": self.task_id}
 
         self.try_number = 0
         self.max_tries = self.task.retries
@@ -1259,12 +1260,7 @@ class TaskInstance(Base, LoggingMixin):
         self.pid = None
 
         if not ignore_all_deps and not ignore_ti_state and self.state == State.SUCCESS:
-            Stats.incr(
-                "previously_succeeded",
-                1,
-                1,
-                tags={"dag_id": self.dag_id, "run_id": self.run_id, "task_id": self.task_id},
-            )
+            Stats.incr("previously_succeeded", tags=self.stat_tags)
 
         if not mark_success:
             # Firstly find non-runnable and non-requeueable tis.
@@ -1409,10 +1405,12 @@ class TaskInstance(Base, LoggingMixin):
             session.merge(self)
             session.commit()
         actual_start_date = timezone.utcnow()
-        Stats.incr(f"ti.start.{self.task.dag_id}.{self.task.task_id}")
+        Stats.incr(f"ti.start.{self.task.dag_id}.{self.task.task_id}", tags=self.stat_tags)
         # Initialize final state counters at zero
         for state in State.task_states:
-            Stats.incr(f"ti.finish.{self.task.dag_id}.{self.task.task_id}.{state}", count=0)
+            Stats.incr(
+                f"ti.finish.{self.task.dag_id}.{self.task.task_id}.{state}", count=0, tags=self.stat_tags
+            )
 
         self.task = self.task.prepare_for_execution()
         context = self.get_template_context(ignore_param_exceptions=False)
@@ -1482,7 +1480,7 @@ class TaskInstance(Base, LoggingMixin):
             session.commit()
             raise
         finally:
-            Stats.incr(f"ti.finish.{self.dag_id}.{self.task_id}.{self.state}")
+            Stats.incr(f"ti.finish.{self.dag_id}.{self.task_id}.{self.state}", tags=self.stat_tags)
 
         # Recording SKIPPED or SUCCESS
         self.clear_next_method_args()
@@ -1543,7 +1541,7 @@ class TaskInstance(Base, LoggingMixin):
         if not self.next_method:
             self.clear_xcom_data()
 
-        with Stats.timer(f"dag.{self.task.dag_id}.{self.task.task_id}.duration"):
+        with Stats.timer(f"dag.{self.task.dag_id}.{self.task.task_id}.duration", tags=self.stat_tags):
             # Set the validated/merged params on the task object.
             self.task.params = context["params"]
 
@@ -1584,10 +1582,8 @@ class TaskInstance(Base, LoggingMixin):
                         self._run_finished_callback(self.task.on_failure_callback, context, "on_failure")
                     raise AirflowException("Task received SIGTERM signal")
 
-        Stats.incr(f"operator_successes_{self.task.task_type}", 1, 1)
-        Stats.incr(
-            "ti_successes", tags={"dag_id": self.dag_id, "run_id": self.run_id, "task_id": self.task_id}
-        )
+        Stats.incr(f"operator_successes_{self.task.task_type}", tags=self.stat_tags)
+        Stats.incr("ti_successes", tags=self.stat_tags)
 
     def _run_finished_callback(
         self,
@@ -1854,10 +1850,10 @@ class TaskInstance(Base, LoggingMixin):
 
         self.end_date = timezone.utcnow()
         self.set_duration()
-        Stats.incr(f"operator_failures_{self.operator}")
-        Stats.incr(
-            "ti_failures", tags={"dag_id": self.dag_id, "run_id": self.run_id, "task_id": self.task_id}
-        )
+
+        Stats.incr(f"operator_failures_{self.operator}", tags=self.stat_tags)
+        Stats.incr("ti_failures", tags=self.stat_tags)
+
         if not test_mode:
             session.add(Log(State.FAILED, self))
 
