@@ -29,6 +29,7 @@ import random
 import signal
 import sys
 import time
+import warnings
 import zipfile
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -1234,6 +1235,9 @@ class DagFileProcessorManager(LoggingMixin):
         This is called once every time around the parsing "loop" - i.e. after
         all files have been parsed.
         """
+        warnings.warn(
+            f"---->  emitting dagbag size {sum(stat.num_dags for stat in self._file_stats.values())}"
+        )
         parse_time = time.perf_counter() - self._parsing_start_time
         Stats.gauge("dag_processing.total_parse_time", parse_time)
         Stats.gauge("dagbag_size", sum(stat.num_dags for stat in self._file_stats.values()))
