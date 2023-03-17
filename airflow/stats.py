@@ -30,7 +30,7 @@ from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.metrics import Instrument
 from opentelemetry.sdk import util
-from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics import MeterProvider, UpDownCounter, ObservableGauge
 from opentelemetry.sdk.metrics._internal.measurement import Measurement
 from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -560,10 +560,15 @@ class SafeDogStatsdLogger:
 class SafeOtelLogger:
     """Otel Logger"""
 
-    def __init__(self, otel_provider, prefix: str = "airflow", allow_list_validator=AllowListValidator()):
+    def __init__(
+        self,
+        otel_provider,
+        prefix: str = "airflow",
+        metrics_validator: ListValidator = AllowListValidator()
+    ):
         self.otel: Callable = otel_provider
         self.prefix: str = prefix
-        self.allow_list_validator = allow_list_validator
+        self.metrics_validator = metrics_validator
         self.meter = otel_provider.get_meter(__name__)
         self.counter_map = CounterMap(self.meter)
         self.gauge_map = GaugeMap(self.meter)
@@ -572,22 +577,20 @@ class SafeOtelLogger:
     @validate_stat
     def incr(self, stat: str, count: int = 1, rate: float = 1, tags: dict[str, str] | None = None):
         """Increment stat"""
-        value = count * rate
+        amount = count * rate
         # warnings.warn(f"*** INCREMENTING {stat}:\t{value}")
-
-        if self.allow_list_validator.test(stat):
+        if self.metrics_validator.test(stat):
             counter = self.counter_map.get_counter(f"{self.prefix}.{stat}")
-            return counter.add(value, attributes=tags)
+            return counter.add(amount, attributes=tags)
 
     @validate_stat
     def decr(self, stat: str, count: int = 1, rate: float = 1, tags: dict[str, str] | None = None):
         """Decrement stat"""
-        value = -1 * (count * rate)
+        amount = count * rate
         # warnings.warn(f"*** DECREMENTING {stat}:\t{value}")
-
-        if self.allow_list_validator.test(stat):
+        if self.metrics_validator.test(stat):
             counter = self.counter_map.get_counter(f"{self.prefix}.{stat}")
-            return counter.add(value, attributes=tags)
+            return counter.add(-amount, attributes=tags)
 
     @validate_stat
     def gauge(
@@ -598,14 +601,25 @@ class SafeOtelLogger:
     ):
         """Gauge stat"""
         # warnings.warn(f"****** UPDATING GAUGE ******\n{stat}:\t{value}")
-        if self.allow_list_validator.test(stat):
+        if self.metrics_validator.test(stat):
+            # TODO
+            #  *********** pick up here **********
+            #   if the key is not in the gauge map,
+            #       create a new observable gauge and add it to the map:
+            #       https://www.dynatrace.com/support/help/shortlink/opentelemetry-instrument-examples#asynchronous-gauge
+            #   else
+            #       get the gauge and gauge.record() ??
+            #   **********************************
+            #   see https://www.dynatrace.com/support/help/extend-dynatrace/opentelemetry/opentelemetry-metrics/opentelemetry-instrument-examples#asynchronous-gauge
+            #   also: convert counters and gauges to the bulder model in that link??
+
             self.gauge_map.set_value(f"{self.prefix}.{stat}", value, attributes=tags)
 
     @validate_stat
     def timing(self, stat: str, dt: DeltaType, tags: dict[str, str] | None = None):
         """Stats timing"""
         # warnings.warn(f"*** UPDATE TIMER {stat}:\t{dt}")
-        if self.allow_list_validator.test(stat):
+        if self.metrics_validator.test(stat):
             if isinstance(dt, datetime.timedelta):
                 dt = dt.total_seconds()
             self.gauge_map.set_value(f"{self.prefix}.{stat}", value=dt, attributes=tags)
@@ -613,6 +627,7 @@ class SafeOtelLogger:
     @validate_stat
     def timer(self, stat: str | None = None, attributes: dict[str, str] | None = None, *args, **kwargs):
         """Timer metric that can be cancelled"""
+        # TODO:   Do I need a TimerMap ?? ??
         return Timer()
 
 
@@ -638,7 +653,7 @@ class CounterMap:
     def clear(self) -> None:
         self.map.clear()
 
-    def get_counter(self, name: str, attributes: dict[str, str] | None = None):
+    def get_counter(self, name: str, attributes: dict[str, str] | None = None) -> UpDownCounter:
         """Returns the value of the counter or creates a new one if it does not exist."""
         key: str = name + str(attributes)
         if key in self.map.keys():
@@ -667,6 +682,9 @@ class GaugeMap:
     def clear(self) -> None:
         self.map.clear()
 
+    def create_gauge(self, name, key, unit, description):
+        self.map[key] = self.meter.create_observable_gauge(name, unit, description)
+
     def set_value(
         self,
         name: str,
@@ -678,11 +696,12 @@ class GaugeMap:
         """Overwrites the value of the gauge or creates a new one if it does not exist."""
         if not attributes:
             attributes = {}
-
         key = name + str(util.get_dict_as_key(attributes))
+        if key not in self.map.keys():
+            self.create_gauge(name, key, unit, description)
         self.map[key] = Measurement(value, BaseInstrument(name, unit, description), attributes)
 
-    def get_readings(self, callback_options) -> Iterable[Measurement]:
+    def get_readings(self) -> Iterable[Measurement]:
         """Returns and clears gauge readings."""
         readings = self.poke_readings()
         self.clear()
@@ -694,6 +713,10 @@ class GaugeMap:
         for val in self.map.values():
             readings.append(val)
         return readings
+
+    def poke_reading(self, name: str, attributes: dict[str | str] | None = None) -> int | float:
+        key = name + str(util.get_dict_as_key(attributes))
+        return self.map[key].value
 
 
 class _Stats(type):
@@ -722,6 +745,21 @@ class _Stats(type):
             else:
                 cls.__class__.factory = NoStatsLogger
 
+    @staticmethod
+    def get_metrics_validator() -> ListValidator:
+        if conf.get("metrics", "metrics_allow_list", fallback=None):
+            metrics_validator = AllowListValidator(conf.get("metrics", "metrics_allow_list"))
+            if conf.get("metrics", "metrics_block_list", fallback=None):
+                log.warning(
+                    "Ignoring metrics_block_list as both metrics_allow_list "
+                    "and metrics_block_list have been set"
+                )
+        elif conf.get("metrics", "metrics_block_list", fallback=None):
+            metrics_validator = BlockListValidator(conf.get("metrics", "metrics_block_list"))
+        else:
+            metrics_validator = AllowListValidator()
+        return metrics_validator
+
     @classmethod
     def get_statsd_logger(cls) -> SafeStatsdLogger:
         """Returns logger for StatsD."""
@@ -749,20 +787,9 @@ class _Stats(type):
             port=conf.getint("metrics", "statsd_port"),
             prefix=conf.get("metrics", "statsd_prefix"),
         )
-        if conf.get("metrics", "metrics_allow_list", fallback=None):
-            metrics_validator = AllowListValidator(conf.get("metrics", "metrics_allow_list"))
-            if conf.get("metrics", "metrics_block_list", fallback=None):
-                log.warning(
-                    "Ignoring metrics_block_list as both metrics_allow_list "
-                    "and metrics_block_list have been set"
-                )
-        elif conf.get("metrics", "metrics_block_list", fallback=None):
-            metrics_validator = BlockListValidator(conf.get("metrics", "metrics_block_list"))
-        else:
-            metrics_validator = AllowListValidator()
         influxdb_tags_enabled = conf.getboolean("metrics", "statsd_influxdb_enabled", fallback=False)
         metric_tags_validator = BlockListValidator(conf.get("metrics", "statsd_disabled_tags", fallback=None))
-        return SafeStatsdLogger(statsd, metrics_validator, influxdb_tags_enabled, metric_tags_validator)
+        return SafeStatsdLogger(statsd, cls.get_metrics_validator(), influxdb_tags_enabled, metric_tags_validator)
 
     @classmethod
     def get_dogstatsd_logger(cls) -> SafeDogStatsdLogger:
@@ -777,20 +804,10 @@ class _Stats(type):
             namespace=conf.get("metrics", "statsd_prefix"),
             constant_tags=cls.get_constant_tags(),
         )
-        if conf.get("metrics", "metrics_allow_list", fallback=None):
-            metrics_validator = AllowListValidator(conf.get("metrics", "metrics_allow_list"))
-            if conf.get("metrics", "metrics_block_list", fallback=None):
-                log.warning(
-                    "Ignoring metrics_block_list as both metrics_allow_list "
-                    "and metrics_block_list have been set"
-                )
-        elif conf.get("metrics", "metrics_block_list", fallback=None):
-            metrics_validator = BlockListValidator(conf.get("metrics", "metrics_block_list"))
-        else:
-            metrics_validator = AllowListValidator()
+
         datadog_metrics_tags = conf.getboolean("metrics", "statsd_datadog_metrics_tags", fallback=True)
         metric_tags_validator = BlockListValidator(conf.get("metrics", "statsd_disabled_tags", fallback=None))
-        return SafeDogStatsdLogger(dogstatsd, metrics_validator, datadog_metrics_tags, metric_tags_validator)
+        return SafeDogStatsdLogger(dogstatsd, cls.get_metrics_validator(), datadog_metrics_tags, metric_tags_validator)
 
     @classmethod
     def get_otel_logger(cls):
@@ -800,10 +817,6 @@ class _Stats(type):
         port = conf.getint("metrics", "otel_port")  # ex: 4318
         prefix = conf.get("metrics", "otel_prefix")  # ex: "airflow"
         interval = conf.getint("metrics", "otel_interval_milliseconds")  # ex: 30000
-
-        # TODO replace existing statsd_allow_list with metrics_allow_list??
-        allow_list = conf.get("metrics", "statsd_allow_list", fallback=None)
-        allow_list_validator = AllowListValidator(allow_list)
 
         resource = Resource(attributes={SERVICE_NAME: "Airflow"})
         # TODO:  figure out https instead of http ??
@@ -835,7 +848,7 @@ class _Stats(type):
         )
         # TODO:  I like the metrics.foo() here for clarity, but maybe import these directly?
 
-        return SafeOtelLogger(metrics.get_meter_provider(), prefix, allow_list_validator)
+        return SafeOtelLogger(metrics.get_meter_provider(), prefix, cls.get_metrics_validator())
         # -----------------------------------------------------------------------------------------
 
         # -----------------------------------------------------------------------------------------
