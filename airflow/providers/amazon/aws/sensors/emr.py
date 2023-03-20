@@ -286,7 +286,11 @@ class EmrContainerSensor(BaseSensorOperator):
         )
 
         if state in self.FAILURE_STATES:
-            raise AirflowException("EMR Containers sensor failed")
+            error_message = self.hook.get_job_failure_reason(self.job_id)
+            raise AirflowException(
+                f"EMR Containers job failed. Final state is {state}. "
+                f"query_execution_id is {self.job_id}. Error: {error_message}"
+            )
 
         if state in self.INTERMEDIATE_STATES:
             return False
