@@ -144,6 +144,22 @@ def delete_virtual_cluster(virtual_cluster_id):
     )
 
 
+@task
+def create_launch_template(template_name: str):
+    # This launch template enables IMDSv2.
+    boto3.client("ec2").create_launch_template(
+        LaunchTemplateName=template_name,
+        LaunchTemplateData={
+            "MetadataOptions": {"HttpEndpoint": "enabled", "HttpTokens": "required"},
+        },
+    )
+
+
+@task(trigger_rule=TriggerRule.ALL_DONE)
+def delete_launch_template(template_name: str):
+    boto3.client("ec2").delete_launch_template(LaunchTemplateName=template_name)
+
+
 with DAG(
     dag_id=DAG_ID,
     schedule="@once",
@@ -162,6 +178,7 @@ with DAG(
     virtual_cluster_name = f"{env_id}-virtual-cluster"
     nodegroup_name = f"{env_id}-nodegroup"
     eks_namespace = "default"
+    launch_template_name = f"{env_id}-launch-template"
 
     # [START howto_operator_emr_eks_config]
     job_driver_arg = {
@@ -203,6 +220,9 @@ with DAG(
         # but a different ARN could be configured and passed if desired.
         nodegroup_role_arn=role_arn,
         resources_vpc_config={"subnetIds": subnets},
+        # The launch template enforces IMDSv2 and is required for internal
+        # compliance when running these system tests on AWS infrastructure.
+        create_nodegroup_kwargs={"launchTemplate": {"name": launch_template_name}},
     )
 
     await_create_nodegroup = EksNodegroupStateSensor(
@@ -276,6 +296,7 @@ with DAG(
         test_context,
         create_bucket,
         upload_s3_file,
+        create_launch_template(launch_template_name),
         create_cluster_and_nodegroup,
         await_create_nodegroup,
         emr_access_on_eks,
@@ -288,6 +309,7 @@ with DAG(
         delete_virtual_cluster(str(create_emr_eks_cluster.output)),
         delete_eks_cluster,
         await_delete_eks_cluster,
+        delete_launch_template(launch_template_name),
         delete_bucket,
     )
 
