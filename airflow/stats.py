@@ -23,11 +23,19 @@ import logging
 import socket
 import string
 import time
+import warnings
 from functools import partial, wraps
 from typing import TYPE_CHECKING, Callable, Iterable, TypeVar, Union, cast
 
+from opentelemetry import metrics
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+
 from airflow.configuration import conf
 from airflow.exceptions import AirflowConfigException, InvalidStatsNameException
+from airflow.stats_clients.otel import CounterMap
 from airflow.typing_compat import Protocol
 
 if TYPE_CHECKING:
@@ -549,6 +557,94 @@ class SafeDogStatsdLogger:
         return Timer()
 
 
+class SafeOtelLogger:
+    """Otel Logger"""
+
+    def __init__(self, otel_provider, prefix: str = "airflow", allow_list_validator=AllowListValidator()):
+        self.otel: Callable = otel_provider
+        self.prefix: str = prefix
+        self.metrics_validator = allow_list_validator
+        self.meter = otel_provider.get_meter(__name__)
+        self.counter_map = CounterMap(self.meter)
+
+    @validate_stat
+    def incr(self, stat: str, count: int = 1, rate: float = 1, tags: dict[str, str] | None = None):
+        """
+        Increment stat by count.
+
+        :param stat: The name of the stat to increment.
+        :param count: A positive integer to add to the current value of stat.
+        :param rate: TODO: define me
+        :param tags: Tags to append to the stat.
+        """
+        if (count < 0) or (rate < 0):
+            raise ValueError("count and rate must both be positive integers.")
+        # TODO: I don't think this is the right use for rate???
+        value = count * rate
+
+        if self.metrics_validator.test(stat):
+            counter = self.counter_map.get_counter(f"{self.prefix}.{stat}")
+            return counter.add(value, attributes=tags)
+
+    @validate_stat
+    def decr(self, stat: str, count: int = 1, rate: float = 1, tags: dict[str, str] | None = None):
+        """
+        Decrement stat by count.
+
+        :param stat: The name of the stat to increment.
+        :param count: A positive integer to subtract from current value of stat.
+        :param rate: TODO: define me
+        :param tags: Tags to append to the stat.
+        """
+        if (count < 0) or (rate < 0):
+            raise ValueError("count and rate must both be positive values.")
+        # TODO: I don't think this is the right use for rate???
+        # TODO: abs() isn't needed since we check for negative above, but keep it for clarity or no?
+        value = abs(count * rate)
+
+        if self.metrics_validator.test(stat):
+            counter = self.counter_map.get_counter(f"{self.prefix}.{stat}")
+            return counter.add(-value, attributes=tags)
+
+    @validate_stat
+    def gauge(
+        self,
+        stat: str,
+        value: int | float,
+        rate: float = 1,
+        delta: bool = False,
+        *,
+        tags: dict[str, str] | None = None,
+    ) -> None:
+        """Gauge stat."""
+        # To be implemented
+        return None
+
+    @validate_stat
+    def timing(
+        self,
+        stat: str,
+        dt: DeltaType,
+        *,
+        tags: dict[str, str] | None = None,
+    ) -> None:
+        """Stats timing."""
+        # To be implemented
+        return None
+
+    @validate_stat
+    def timer(
+        self,
+        stat: str | None = None,
+        *args,
+        tags: dict[str, str] | None = None,
+        **kwargs,
+    ) -> TimerProtocol:
+        """Timer metric that can be cancelled."""
+        # To be implemented
+        return Timer()
+
+
 class _Stats(type):
     factory: Callable
     instance: StatsLogger | NoStatsLogger | None = None
@@ -570,6 +666,8 @@ class _Stats(type):
                 cls.__class__.factory = cls.get_dogstatsd_logger
             elif conf.getboolean("metrics", "statsd_on"):
                 cls.__class__.factory = cls.get_statsd_logger
+            elif conf.getboolean("metrics", "otel_on"):
+                cls.__class__.factory = cls.get_otel_logger
             else:
                 cls.__class__.factory = NoStatsLogger
 
@@ -642,6 +740,63 @@ class _Stats(type):
         datadog_metrics_tags = conf.getboolean("metrics", "statsd_datadog_metrics_tags", fallback=True)
         metric_tags_validator = BlockListValidator(conf.get("metrics", "statsd_disabled_tags", fallback=None))
         return SafeDogStatsdLogger(dogstatsd, metrics_validator, datadog_metrics_tags, metric_tags_validator)
+
+    @classmethod
+    def get_otel_logger(cls):
+        """Get Otel logger"""
+        # TODO: wrap this in a try/except with a useful message about missing a required value ??
+        host = conf.get("metrics", "otel_host")  # ex: "breeze-otel-collector"
+        port = conf.getint("metrics", "otel_port")  # ex: 4318
+        prefix = conf.get("metrics", "otel_prefix")  # ex: "airflow"
+        interval = conf.getint("metrics", "otel_interval_milliseconds")  # ex: 30000
+
+        allow_list = conf.get("metrics", "metrics_allow_list", fallback=None)
+        allow_list_validator = AllowListValidator(allow_list)
+
+        resource = Resource(attributes={SERVICE_NAME: "Airflow"})
+        # TODO:  figure out https instead of http ??
+        endpoint = f"http://{host}:{port}/v1/metrics"
+
+        print(f"[Metric Exporter] Connecting to OTLP at ---> {endpoint}")
+        readers = [
+            PeriodicExportingMetricReader(
+                OTLPMetricExporter(
+                    endpoint=endpoint,
+                    headers={"Content-Type": "application/json"},
+                ),
+                export_interval_millis=interval,
+            )
+        ]
+
+        # TODO:  remove this console exporter before merge
+        debug = False
+        if debug:
+            export_to_console = PeriodicExportingMetricReader(ConsoleMetricExporter())
+            readers.append(export_to_console)
+
+        # TODO: Here and in the return statement:
+        #       I like the metrics.foo() here for clarity, but maybe import these directly?
+        metrics.set_meter_provider(
+            MeterProvider(
+                resource=resource,
+                metric_readers=readers,
+                shutdown_on_exit=False,
+            ),
+        )
+
+        return SafeOtelLogger(metrics.get_meter_provider(), prefix, allow_list_validator)
+        # -----------------------------------------------------------------------------------------
+
+        # -----------------------------------------------------------------------------------------
+        # TODO:  the following comment is copypasta from POC2 and not confirmed
+        # if we do not set 'shutdown_on_exit' to False, somehow(?) the
+        # MeterProvider will constantly get shutdown every second
+        # something having to do with the following code:
+        # if shutdown_on_exit:
+        #     self._atexit_handler = register(self.shutdown)
+        # not sure why...
+        # metrics.set_meter_provider(MeterProvider(metric_readers=[reader], shutdown_on_exit=False))
+        # -----------------------------------------------------------------------------------------
 
     @classmethod
     def get_constant_tags(cls) -> list[str]:
