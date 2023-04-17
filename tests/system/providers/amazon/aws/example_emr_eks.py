@@ -25,7 +25,7 @@ import boto3
 from airflow import DAG
 from airflow.decorators import task
 from airflow.models.baseoperator import chain
-from airflow.providers.amazon.aws.hooks.eks import ClusterStates, NodegroupStates
+from airflow.providers.amazon.aws.hooks.eks import ClusterStates, NodegroupStates, EksHook
 from airflow.providers.amazon.aws.operators.eks import EksCreateClusterOperator, EksDeleteClusterOperator
 from airflow.providers.amazon.aws.operators.emr import EmrContainerOperator, EmrEksCreateClusterOperator
 from airflow.providers.amazon.aws.operators.s3 import (
@@ -112,6 +112,24 @@ def update_trust_policy_execution_role(cluster_name, cluster_namespace, role_nam
             role_trust_policy["Statement"],
         )
     )
+
+    # Add the cluster's OIDC Identity Provider to the policy
+    # oidc = EksHook().describe_cluster(name=cluster_name)['cluster']['identity']['oidc']['issuer']
+    enable_oidc = (
+        f"aws eks describe-cluster --name {cluster_name} --query 'cluster.identity.oidc.issuer' "
+        f"--output text"
+    )
+
+    build = subprocess.Popen(
+        enable_oidc,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _, err = build.communicate()
+
+    if build.returncode != 0:
+        raise RuntimeError(err)
 
     client.update_assume_role_policy(
         RoleName=role_name,
