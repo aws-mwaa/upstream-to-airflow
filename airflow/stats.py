@@ -617,7 +617,8 @@ class SafeOtelLogger:
         tags: dict[str, str] | None = None,
     ) -> None:
         """Gauge stat."""
-        # To be implemented
+        if self.metrics_validator.test(stat):
+            self.counter_map.set_value(f"{self.prefix}.{stat}", value, attributes=tags)
         return None
 
     @validate_stat

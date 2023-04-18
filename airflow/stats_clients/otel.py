@@ -17,7 +17,11 @@
 
 from __future__ import annotations
 
+from typing import Iterable
+
 from opentelemetry.metrics import Instrument
+from opentelemetry.sdk.metrics._internal.measurement import Measurement
+from opentelemetry.sdk import util
 
 # TODO:  Move this set into a config file with "units" and "description" values??
 UP_DOWN_COUNTERS = {
@@ -31,7 +35,7 @@ def is_up_down_counter(name):
 
 
 class BaseInstrument(Instrument):
-    """Instrument clss is abstract and must be implemented."""
+    """Instrument class is abstract and must be implemented."""
 
     def __init__(
         self, name: str, unit: str = "", description: str = "", attributes: dict[str, str] | None = None
@@ -40,6 +44,42 @@ class BaseInstrument(Instrument):
         self.unit: str = unit
         self.description: str = description
         self.attributes: dict[str, str] | None = attributes
+
+
+class GaugeMap:
+    """Stores Otel Gauges."""
+
+    def __init__(self, meter):
+        self.meter = meter
+        self.map = {}
+
+    def clear(self) -> None:
+        self.map.clear()
+
+    # set value would store the value of the gauge
+    def set_value(self, name, value, unit="", description="", attributes=None) -> None:
+        if not attributes:
+            attributes = {}
+
+        key = name + str(util.get_dict_as_key(attributes))
+        # any previously existing measurement would get effectively overwritten
+        self.map[key] = Measurement(value, BaseInstrument(name, unit, description), attributes)
+
+    # retrieve readings
+    def get_readings(self) -> Iterable[Measurement]:
+        ret = self.poke_readings()
+        # clear the map when getting the readings
+        # in this way, any accumulated gauge wouldn't survive
+        # once the readings are extracted.
+        self.clear()
+        return ret
+
+    # poke readings, without clearing the gauge map
+    def poke_readings(self) -> Iterable[Measurement]:
+        ret = []
+        for val in self.map.values():
+            ret.append(val)
+        return ret
 
 
 class CounterMap:
