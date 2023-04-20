@@ -16,8 +16,11 @@
 # under the License.
 from __future__ import annotations
 
+import warnings
+from copy import deepcopy
 from typing import Callable
 
+import yaml
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.metrics import Instrument
@@ -29,10 +32,26 @@ from airflow.configuration import conf
 from airflow.metrics.protocols import DeltaType, Timer, TimerProtocol
 from airflow.metrics.validators import AllowListValidator, validate_stat
 
-# TODO:  Move this set into a config file with "units" and "description" values??
-UP_DOWN_COUNTERS = {
-    "dag_processing.processes",
-}
+# TODO: move this path to an Airflow config entry
+REGISTRY_PATH = "airflow/metrics/metrics_registry.yaml"
+
+
+def _format_registry_entries(registry):
+    formatted = deepcopy(registry)
+    for entry in formatted:
+        try:
+            _ = entry['description']
+        except KeyError:
+            entry['description'] = ""
+    return formatted
+
+
+# TODO This should maybe be in stats.py?
+def get_metrics_registry():
+    with open(REGISTRY_PATH) as registry:
+        raw_data = yaml.safe_load(registry)["metrics"]
+    data = _format_registry_entries(raw_data)
+    return {data[index]["name"]: data[index] for index in range(len(data))}
 
 
 class SafeOtelLogger:
@@ -123,11 +142,6 @@ class SafeOtelLogger:
         return Timer()
 
 
-def is_up_down_counter(name):
-    # Append the `airflow` prefix to all names
-    return name in {f"airflow.{name}" for name in UP_DOWN_COUNTERS}
-
-
 class BaseInstrument(Instrument):
     """Instrument clss is abstract and must be implemented."""
 
@@ -144,25 +158,38 @@ class MetricsMap:
     """Stores Otel Counters."""
 
     def __init__(self, meter):
+        self.metrics_registry = get_metrics_registry()
         self.meter = meter
         self.map = {}
 
     def clear(self) -> None:
         self.map.clear()
 
+    def _is_up_down_counter(self, name):
+        return self.metrics_registry[name]["type"] == "up_down_counter"
+
     def _create_counter(self, name):
         """Creates a new counter or up_down_counter for the provided name."""
-        # TODO:  OTel imposes a 63-character limit to metric names.
-        #   Any part of the name which is not fixed should instead be a tag.
-        #   error message here:  https://quip-amazon.com/qA0wAEzAY7gn/Notes-OTel-Planning#temp:C:QHV87f5f9b6338e4085935c14e93
-        counter_name = name if len(name) < 64 else name[:63]
+        metric_data = {}
+        # TODO: the slice removes "airflow." from the name.  Do Better
+        base_name = name[8:]
+        try:
+            metric_data = self.metrics_registry[base_name]
+        except KeyError:
+            warnings.warn(f'======>  Registry is missing metric: {base_name[:35]}')
+            # TODO:   Wrap in a try/except/raise with a useful message
+            metric_data['name'] = base_name
+            metric_data['type'] = 'counter'
+            metric_data['description'] = ''
+            self.metrics_registry[base_name] = metric_data
+            raise RuntimeError(f'missing metric {base_name}')
 
-        if is_up_down_counter(name):
-            counter = self.meter.create_up_down_counter(counter_name)
+        if self._is_up_down_counter(metric_data["name"]):
+            counter = self.meter.create_up_down_counter(name=metric_data['name'][:35], description=metric_data['description'])
         else:
-            counter = self.meter.create_counter(counter_name)
+            counter = self.meter.create_counter(name=metric_data['name'][:35], description=metric_data['description'])
 
-        print(f"--> created {name} as a {type(counter)}")
+        print(f"--> created {metric_data['name']} as a {type(counter)}")
         return counter
 
     def get_counter(self, name: str, attributes: dict[str, str] | None = None):
