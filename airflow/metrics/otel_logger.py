@@ -14,15 +14,20 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 from __future__ import annotations
 
 from typing import Callable
 
+from opentelemetry import metrics
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.metrics import Instrument
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics._internal.export import ConsoleMetricExporter, PeriodicExportingMetricReader
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 
-from airflow.metrics.validators import validate_stat
-from airflow.stats import DeltaType, TimerProtocol
+from airflow.configuration import conf
+from airflow.metrics.protocols import DeltaType, Timer, TimerProtocol
+from airflow.metrics.validators import AllowListValidator, validate_stat
 
 # TODO:  Move this set into a config file with "units" and "description" values??
 UP_DOWN_COUNTERS = {
@@ -185,3 +190,60 @@ class MetricsMap:
         key: str = name + str(attributes)
         if key in self.map.keys():
             del self.map[key]
+
+
+def get_otel_logger(cls) -> SafeOtelLogger:
+    """Get Otel logger"""
+    # TODO: wrap this in a try/except with a useful message about missing a required value ??
+    host = conf.get("metrics", "otel_host")  # ex: "breeze-otel-collector"
+    port = conf.getint("metrics", "otel_port")  # ex: 4318
+    prefix = conf.get("metrics", "otel_prefix")  # ex: "airflow"
+    interval = conf.getint("metrics", "otel_interval_milliseconds")  # ex: 30000
+
+    allow_list = conf.get("metrics", "metrics_allow_list", fallback=None)
+    allow_list_validator = AllowListValidator(allow_list)
+
+    resource = Resource(attributes={SERVICE_NAME: "Airflow"})
+    # TODO:  figure out https instead of http ??
+    endpoint = f"http://{host}:{port}/v1/metrics"
+
+    print(f"[Metric Exporter] Connecting to OTLP at ---> {endpoint}")
+    readers = [
+        PeriodicExportingMetricReader(
+            OTLPMetricExporter(
+                endpoint=endpoint,
+                headers={"Content-Type": "application/json"},
+            ),
+            export_interval_millis=interval,
+        )
+    ]
+
+    # TODO:  remove this console exporter before merge
+    debug = False
+    if debug:
+        export_to_console = PeriodicExportingMetricReader(ConsoleMetricExporter())
+        readers.append(export_to_console)
+
+    # TODO: Here and in the return statement:
+    #       I like the metrics.foo() here for clarity, but maybe import these directly?
+    metrics.set_meter_provider(
+        MeterProvider(
+            resource=resource,
+            metric_readers=readers,
+            shutdown_on_exit=False,
+        ),
+    )
+
+    return SafeOtelLogger(metrics.get_meter_provider(), prefix, allow_list_validator)
+    # -----------------------------------------------------------------------------------------
+
+    # -----------------------------------------------------------------------------------------
+    # TODO:  the following comment is copypasta from POC2 and not confirmed
+    # if we do not set 'shutdown_on_exit' to False, somehow(?) the
+    # MeterProvider will constantly get shutdown every second
+    # something having to do with the following code:
+    # if shutdown_on_exit:
+    #     self._atexit_handler = register(self.shutdown)
+    # not sure why...
+    # metrics.set_meter_provider(MeterProvider(metric_readers=[reader], shutdown_on_exit=False))
+    # -----------------------------------------------------------------------------------------

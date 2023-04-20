@@ -22,18 +22,8 @@ import socket
 from typing import TYPE_CHECKING, Callable
 
 from airflow.configuration import conf
-from airflow.exceptions import AirflowConfigException
-from airflow.metrics.otel import MetricsMap, SafeOtelLogger
-from airflow.metrics.validators import AllowListValidator, BlockListValidator, ListValidator, validate_stat
-from airflow.metrics import datadog_logger, statsd_logger
-from airflow.metrics.protocols import DeltaType, StatsLogger, Timer, TimerProtocol
-from airflow.exceptions import AirflowConfigException, InvalidStatsNameException
-from airflow.stats_clients.otel import CounterMap
-from airflow.typing_compat import Protocol
-
-if TYPE_CHECKING:
-    from datadog import DogStatsd
-    from statsd import StatsClient
+from airflow.metrics import datadog_logger, otel_logger, statsd_logger
+from airflow.metrics.base_stats_logger import NoStatsLogger, StatsLogger
 
 log = logging.getLogger(__name__)
 
