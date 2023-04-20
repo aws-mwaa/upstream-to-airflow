@@ -17,15 +17,12 @@
 # under the License.
 from __future__ import annotations
 
-import abc
 import datetime
 import logging
 import socket
-import string
 import time
-import warnings
-from functools import partial, wraps
-from typing import TYPE_CHECKING, Callable, Iterable, TypeVar, Union, cast
+from functools import wraps
+from typing import TYPE_CHECKING, Callable, TypeVar, Union, cast
 
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
@@ -34,8 +31,9 @@ from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExpo
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 
 from airflow.configuration import conf
-from airflow.exceptions import AirflowConfigException, InvalidStatsNameException
-from airflow.stats_clients.otel import CounterMap
+from airflow.exceptions import AirflowConfigException
+from airflow.metrics.otel import MetricsMap, SafeOtelLogger
+from airflow.metrics.validators import AllowListValidator, BlockListValidator, ListValidator, validate_stat
 from airflow.typing_compat import Protocol
 
 if TYPE_CHECKING:
@@ -196,106 +194,7 @@ class Timer(TimerProtocol):
             self.real_timer.stop()
 
 
-# Only characters in the character set are considered valid
-# for the stat_name if stat_name_default_handler is used.
-ALLOWED_CHARACTERS = frozenset(string.ascii_letters + string.digits + "_.-")
-
-
-def stat_name_default_handler(
-    stat_name: str, max_length: int = 250, allowed_chars: Iterable[str] = ALLOWED_CHARACTERS
-) -> str:
-    """
-    Validate the StatsD stat name.
-
-    Apply changes when necessary and return the transformed stat name.
-    """
-    if not isinstance(stat_name, str):
-        raise InvalidStatsNameException("The stat_name has to be a string")
-    if len(stat_name) > max_length:
-        raise InvalidStatsNameException(
-            f"The stat_name ({stat_name}) has to be less than {max_length} characters."
-        )
-    if not all((c in allowed_chars) for c in stat_name):
-        raise InvalidStatsNameException(
-            f"The stat name ({stat_name}) has to be composed of ASCII "
-            f"alphabets, numbers, or the underscore, dot, or dash characters."
-        )
-    return stat_name
-
-
-def get_current_handler_stat_name_func() -> Callable[[str], str]:
-    """Get Stat Name Handler from airflow.cfg."""
-    handler = conf.getimport("metrics", "stat_name_handler")
-    if handler is None:
-        if conf.get("metrics", "statsd_influxdb_enabled", fallback=False):
-            handler = partial(stat_name_default_handler, allowed_chars={*ALLOWED_CHARACTERS, ",", "="})
-        else:
-            handler = stat_name_default_handler
-    return handler
-
-
 T = TypeVar("T", bound=Callable)
-
-
-def validate_stat(fn: T) -> T:
-    """
-    Check if stat name contains invalid characters.
-    Log and not emit stats if name is invalid.
-    """
-
-    @wraps(fn)
-    def wrapper(self, stat: str | None = None, *args, **kwargs) -> T | None:
-        try:
-            if stat is not None:
-                handler_stat_name_func = get_current_handler_stat_name_func()
-                stat = handler_stat_name_func(stat)
-            return fn(self, stat, *args, **kwargs)
-        except InvalidStatsNameException:
-            log.exception("Invalid stat name: %s.", stat)
-            return None
-
-    return cast(T, wrapper)
-
-
-class ListValidator(metaclass=abc.ABCMeta):
-    """
-    ListValidator metaclass that can be implemented as a AllowListValidator
-    or BlockListValidator. The test method must be overridden by its subclass.
-    """
-
-    def __init__(self, validate_list: str | None = None) -> None:
-        self.validate_list: tuple[str, ...] | None = (
-            tuple(item.strip().lower() for item in validate_list.split(",")) if validate_list else None
-        )
-
-    @classmethod
-    def __subclasshook__(cls, subclass: Callable[[str], str]) -> bool:
-        return hasattr(subclass, "test") and callable(subclass.test) or NotImplemented
-
-    @abc.abstractmethod
-    def test(self, name: str) -> bool:
-        """Test if name is allowed"""
-        raise NotImplementedError
-
-
-class AllowListValidator(ListValidator):
-    """AllowListValidator only allows names that match the allowed prefixes."""
-
-    def test(self, name: str) -> bool:
-        if self.validate_list is not None:
-            return name.strip().lower().startswith(self.validate_list)
-        else:
-            return True  # default is all metrics are allowed
-
-
-class BlockListValidator(ListValidator):
-    """BlockListValidator only allows names that do not match the blocked prefixes."""
-
-    def test(self, name: str) -> bool:
-        if self.validate_list is not None:
-            return not name.strip().lower().startswith(self.validate_list)
-        else:
-            return True  # default is all metrics are allowed
 
 
 def prepare_stat_with_tags(fn: T) -> T:
@@ -554,94 +453,6 @@ class SafeDogStatsdLogger:
             tags_list = []
         if stat and self.metrics_validator.test(stat):
             return Timer(self.dogstatsd.timed(stat, tags=tags_list, **kwargs))
-        return Timer()
-
-
-class SafeOtelLogger:
-    """Otel Logger"""
-
-    def __init__(self, otel_provider, prefix: str = "airflow", allow_list_validator=AllowListValidator()):
-        self.otel: Callable = otel_provider
-        self.prefix: str = prefix
-        self.metrics_validator = allow_list_validator
-        self.meter = otel_provider.get_meter(__name__)
-        self.counter_map = CounterMap(self.meter)
-
-    @validate_stat
-    def incr(self, stat: str, count: int = 1, rate: float = 1, tags: dict[str, str] | None = None):
-        """
-        Increment stat by count.
-
-        :param stat: The name of the stat to increment.
-        :param count: A positive integer to add to the current value of stat.
-        :param rate: TODO: define me
-        :param tags: Tags to append to the stat.
-        """
-        if (count < 0) or (rate < 0):
-            raise ValueError("count and rate must both be positive integers.")
-        # TODO: I don't think this is the right use for rate???
-        value = count * rate
-
-        if self.metrics_validator.test(stat):
-            counter = self.counter_map.get_counter(f"{self.prefix}.{stat}")
-            return counter.add(value, attributes=tags)
-
-    @validate_stat
-    def decr(self, stat: str, count: int = 1, rate: float = 1, tags: dict[str, str] | None = None):
-        """
-        Decrement stat by count.
-
-        :param stat: The name of the stat to increment.
-        :param count: A positive integer to subtract from current value of stat.
-        :param rate: TODO: define me
-        :param tags: Tags to append to the stat.
-        """
-        if (count < 0) or (rate < 0):
-            raise ValueError("count and rate must both be positive values.")
-        # TODO: I don't think this is the right use for rate???
-        # TODO: abs() isn't needed since we check for negative above, but keep it for clarity or no?
-        value = abs(count * rate)
-
-        if self.metrics_validator.test(stat):
-            counter = self.counter_map.get_counter(f"{self.prefix}.{stat}")
-            return counter.add(-value, attributes=tags)
-
-    @validate_stat
-    def gauge(
-        self,
-        stat: str,
-        value: int | float,
-        rate: float = 1,
-        delta: bool = False,
-        *,
-        tags: dict[str, str] | None = None,
-    ) -> None:
-        """Gauge stat."""
-        # To be implemented
-        return None
-
-    @validate_stat
-    def timing(
-        self,
-        stat: str,
-        dt: DeltaType,
-        *,
-        tags: dict[str, str] | None = None,
-    ) -> None:
-        """Stats timing."""
-        # To be implemented
-        return None
-
-    @validate_stat
-    def timer(
-        self,
-        stat: str | None = None,
-        *args,
-        tags: dict[str, str] | None = None,
-        **kwargs,
-    ) -> TimerProtocol:
-        """Timer metric that can be cancelled."""
-        # To be implemented
         return Timer()
 
 
