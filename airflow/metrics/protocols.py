@@ -44,59 +44,6 @@ class TimerProtocol(Protocol):
         ...
 
 
-class StatsLogger(Protocol):
-    """This class is only used for TypeChecking (for IDEs, mypy, etc)."""
-
-    @classmethod
-    def incr(
-        cls,
-        stat: str,
-        count: int = 1,
-        rate: int | float = 1,
-        *,
-        tags: dict[str, str] | None = None,
-    ) -> None:
-        """Increment stat."""
-
-    @classmethod
-    def decr(
-        cls,
-        stat: str,
-        count: int = 1,
-        rate: int | float = 1,
-        *,
-        tags: dict[str, str] | None = None,
-    ) -> None:
-        """Decrement stat."""
-
-    @classmethod
-    def gauge(
-        cls,
-        stat: str,
-        value: float,
-        rate: int | float = 1,
-        delta: bool = False,
-        *,
-        tags: dict[str, str] | None = None,
-    ) -> None:
-        """Gauge stat."""
-
-    @classmethod
-    def timing(
-        cls,
-        stat: str,
-        dt: DeltaType | None,
-        *,
-        tags: dict[str, str] | None = None,
-    ) -> None:
-        """Stats timing."""
-
-    @classmethod
-    def timer(cls, *args, **kwargs) -> TimerProtocol:
-        """Timer metric that can be cancelled."""
-        raise NotImplementedError()
-
-
 class Timer(TimerProtocol):
     """
     Timer that records duration, and optional sends to StatsD backend.
