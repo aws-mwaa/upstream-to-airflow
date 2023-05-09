@@ -30,12 +30,14 @@ from typing import IO, Any, TypeVar, cast
 ANSI_ESCAPE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
 
 
-# Private: A sentinel objects
 class SetContextPropagate(enum.Enum):
-    """:meta private:."""
+    """Sentinel objects for log propagation contexts.
 
-    # If a `set_context` function wants to _keep_ propagation set on it's logger it needs to return this
-    # special value.
+    :meta private:
+    """
+
+    # If a `set_context` function wants to _keep_ propagation set on its logger,
+    # it needs to return this special value.
     MAINTAIN_PROPAGATE = object()
     # Don't use this one anymore!
     DISABLE_PROPAGATE = object()
