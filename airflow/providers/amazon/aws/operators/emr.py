@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import ast
+from datetime import timedelta
 import warnings
 from typing import TYPE_CHECKING, Any, Sequence
 from uuid import uuid4
@@ -26,6 +27,7 @@ from airflow.exceptions import AirflowException
 from airflow.models import BaseOperator
 from airflow.providers.amazon.aws.hooks.emr import EmrContainerHook, EmrHook, EmrServerlessHook
 from airflow.providers.amazon.aws.links.emr import EmrClusterLink
+from airflow.providers.amazon.aws.triggers.emr import EmrCreateJobFlowTrigger
 from airflow.providers.amazon.aws.utils.waiter import waiter
 from airflow.utils.helpers import exactly_one, prune_dict
 from airflow.utils.types import NOTSET, ArgNotSet
@@ -587,6 +589,8 @@ class EmrCreateJobFlowOperator(BaseOperator):
         wait_for_completion=True, None = no limit) (Deprecated.  Please use waiter_max_attempts.)
     :param waiter_check_interval_seconds: Number of seconds between polling the jobflow state. Defaults to 60
         seconds. (Deprecated.  Please use waiter_delay.)
+    :param deferrable: If True, the operator will wait asynchronously for the job to complete.
+        This implies waiting for completion. This mode requires aiobotocore module to be installed.
     """
 
     template_fields: Sequence[str] = (
@@ -612,6 +616,7 @@ class EmrCreateJobFlowOperator(BaseOperator):
         waiter_delay: int | None | ArgNotSet = NOTSET,
         waiter_countdown: int | None = None,
         waiter_check_interval_seconds: int = 60,
+        deferrable: bool = False,
         **kwargs: Any,
     ):
         if waiter_max_attempts is NOTSET:
@@ -638,6 +643,7 @@ class EmrCreateJobFlowOperator(BaseOperator):
         self.wait_for_completion = wait_for_completion
         self.waiter_max_attempts = waiter_max_attempts
         self.waiter_delay = waiter_delay
+        self.deferrable = deferrable
 
         self._job_flow_id: str | None = None
 
@@ -671,8 +677,18 @@ class EmrCreateJobFlowOperator(BaseOperator):
                 aws_partition=self._emr_hook.conn_partition,
                 job_flow_id=self._job_flow_id,
             )
-
-            if self.wait_for_completion:
+            if self.deferrable:
+                self.defer(
+                    trigger=EmrCreateJobFlowTrigger(
+                        job_flow_id=self._job_flow_id,
+                        aws_conn_id=self.aws_conn_id,
+                        max_attempts=self.waiter_max_attempts,
+                        poll_interval=self.waiter_delay,
+                    ),
+                    method_name="execute_complete",
+                    timeout=timedelta(seconds=self.waiter_max_attempts * self.waiter_delay + 60),
+                )
+            elif self.wait_for_completion:
                 self._emr_hook.get_waiter("job_flow_waiting").wait(
                     ClusterId=self._job_flow_id,
                     WaiterConfig=prune_dict(
@@ -684,6 +700,13 @@ class EmrCreateJobFlowOperator(BaseOperator):
                 )
 
             return self._job_flow_id
+    
+    def execute_complete(self, context, event=None):
+        if event["status"] != "success":
+            raise AirflowException(f"Error creating job flow: {event}")
+        else:
+            self.log.info("JobFlow created successfully")
+        return
 
     def on_kill(self) -> None:
         """

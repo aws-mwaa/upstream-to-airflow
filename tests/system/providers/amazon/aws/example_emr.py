@@ -166,6 +166,9 @@ with DAG(
         steps=SPARK_STEPS,
         wait_for_completion=True,
         execution_role_arn=execution_role_arn,
+        deferrable=True,
+        waiter_delay=30,
+        waiter_max_attempts=200,
     )
     # [END howto_operator_emr_add_steps]
 
