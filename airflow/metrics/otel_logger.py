@@ -55,7 +55,13 @@ log = logging.getLogger(__name__)
 # https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/api.md#updowncounter
 UP_DOWN_COUNTERS = {"airflow.dag_processing.processes"}
 
-METRIC_NAME_PREFIX = "airflow."
+DEFAULT_METRIC_NAME_PREFIX = "airflow"
+# Delimiter is placed between the universal metric prefix and the unique metric name.
+DEFAULT_METRIC_NAME_DELIMITER = "."
+
+
+def full_name(name: str, prefix: str = DEFAULT_METRIC_NAME_PREFIX) -> str:
+    return f"{prefix}{DEFAULT_METRIC_NAME_DELIMITER}{name}"
 
 
 def _is_up_down_counter(name):
@@ -86,7 +92,12 @@ def name_is_otel_safe(prefix: str, name: str) -> bool:
 class SafeOtelLogger:
     """Otel Logger"""
 
-    def __init__(self, otel_provider, prefix: str = "airflow", allow_list_validator=AllowListValidator()):
+    def __init__(
+        self,
+        otel_provider,
+        prefix: str = DEFAULT_METRIC_NAME_PREFIX,
+        allow_list_validator=AllowListValidator(),
+    ):
         self.otel: Callable = otel_provider
         self.prefix: str = prefix
         self.metrics_validator = allow_list_validator
@@ -115,7 +126,7 @@ class SafeOtelLogger:
             return
 
         if self.metrics_validator.test(stat) and name_is_otel_safe(self.prefix, stat):
-            counter = self.metrics_map.get_counter(f"{self.prefix}.{stat}", attributes=tags)
+            counter = self.metrics_map.get_counter(full_name(prefix=self.prefix, name=stat), attributes=tags)
             counter.add(count, attributes=tags)
             return counter
 
@@ -141,7 +152,7 @@ class SafeOtelLogger:
             return
 
         if self.metrics_validator.test(stat) and name_is_otel_safe(self.prefix, stat):
-            counter = self.metrics_map.get_counter(f"{self.prefix}.{stat}")
+            counter = self.metrics_map.get_counter(full_name(prefix=self.prefix, name=stat))
             counter.add(-count, attributes=tags)
             return counter
 
