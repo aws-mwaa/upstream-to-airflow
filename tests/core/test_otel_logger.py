@@ -25,6 +25,7 @@ from opentelemetry.metrics import MeterProvider
 from pytest import param
 
 from airflow.exceptions import InvalidStatsNameException
+from airflow.metrics import otel_logger
 from airflow.metrics.otel_logger import (
     OTEL_NAME_MAX_LENGTH,
     UP_DOWN_COUNTERS,
@@ -32,7 +33,6 @@ from airflow.metrics.otel_logger import (
     SafeOtelLogger,
     _generate_key_name,
     _is_up_down_counter,
-    full_name,
 )
 from airflow.metrics.validators import BACK_COMPAT_METRIC_NAMES, MetricNameLengthExemptionWarning
 
@@ -47,6 +47,11 @@ INVALID_STAT_NAME_CASES = [
 @pytest.fixture
 def name():
     return "test_stats_run"
+
+
+@pytest.fixture
+def full_name(name):
+    return otel_logger.full_name(name)
 
 
 class TestOtelMetrics:
@@ -97,24 +102,24 @@ class TestOtelMetrics:
             self.stats.incr(name)
 
         self.meter.get_meter().create_counter.assert_called_once_with(
-            name=(full_name(name)[:OTEL_NAME_MAX_LENGTH])
+            name=(otel_logger.full_name(name)[:OTEL_NAME_MAX_LENGTH])
         )
 
-    def test_incr_new_metric(self, name):
+    def test_incr_new_metric(self, name, full_name):
         self.stats.incr(name)
 
-        self.meter.get_meter().create_counter.assert_called_once_with(name=full_name(name))
+        self.meter.get_meter().create_counter.assert_called_once_with(name=full_name)
 
-    def test_incr_new_metric_with_tags(self, name):
+    def test_incr_new_metric_with_tags(self, name, full_name):
         tags = {"hello": "world"}
-        key = _generate_key_name(full_name(name), tags)
+        key = _generate_key_name(full_name, tags)
 
         self.stats.incr(name, tags=tags)
 
-        self.meter.get_meter().create_counter.assert_called_once_with(name=full_name(name))
+        self.meter.get_meter().create_counter.assert_called_once_with(name=full_name)
         self.map[key].add.assert_called_once_with(1, attributes=tags)
 
-    def test_incr_existing_metric(self, name):
+    def test_incr_existing_metric(self, name, full_name):
         # Create the metric and set value to 1
         self.stats.incr(name)
         # Increment value to 2
@@ -123,7 +128,7 @@ class TestOtelMetrics:
         assert self.map[full_name(name)].add.call_count == 2
 
     @mock.patch("random.random", side_effect=[0.1, 0.9])
-    def test_incr_with_rate_limit_works(self, mock_random, name):
+    def test_incr_with_rate_limit_works(self, mock_random, name, full_name):
         # Create the counter and set the value to 1
         self.stats.incr(name, rate=0.5)
         # This one should not increment because random() will return a value higher than `rate`
@@ -133,9 +138,9 @@ class TestOtelMetrics:
             self.stats.incr(name, rate=-0.5)
 
         assert mock_random.call_count == 2
-        assert self.map[full_name(name)].add.call_count == 1
+        assert self.map[full_name].add.call_count == 1
 
-    def test_decr_existing_metric(self, name):
+    def test_decr_existing_metric(self, name, full_name):
         expected_calls = [
             mock.call(1, attributes=None),
             mock.call(-1, attributes=None),
@@ -146,11 +151,11 @@ class TestOtelMetrics:
         # Decrement value to 0
         self.stats.decr(name)
 
-        self.map[full_name(name)].add.assert_has_calls(expected_calls)
-        assert self.map[full_name(name)].add.call_count == len(expected_calls)
+        self.map[full_name].add.assert_has_calls(expected_calls)
+        assert self.map[full_name].add.call_count == len(expected_calls)
 
     @mock.patch("random.random", side_effect=[0.1, 0.9])
-    def test_decr_with_rate_limit_works(self, mock_random, name):
+    def test_decr_with_rate_limit_works(self, mock_random, name, full_name):
         expected_calls = [
             mock.call(1, attributes=None),
             mock.call(-1, attributes=None),
@@ -168,35 +173,35 @@ class TestOtelMetrics:
 
         assert mock_random.call_count == 2
         # add() is called once in the initial stats.incr and once for the decr that passed the rate check.
-        self.map[full_name(name)].add.assert_has_calls(expected_calls)
-        self.map[full_name(name)].add.call_count == 2
+        self.map[full_name].add.assert_has_calls(expected_calls)
+        self.map[full_name].add.call_count == 2
 
-    def test_gauge_new_metric(self, name):
+    def test_gauge_new_metric(self, name, full_name):
         self.stats.gauge(name, value=1)
 
         self.meter.get_meter().create_observable_gauge.assert_called_once_with(
-            name=full_name(name), callbacks=ANY
+            name=full_name, callbacks=ANY
         )
 
-    def test_gauge_new_metric_with_tags(self, name):
+    def test_gauge_new_metric_with_tags(self, name, full_name):
         tags = {"hello": "world"}
-        key = _generate_key_name(full_name(name), tags)
+        key = _generate_key_name(full_name, tags)
 
         self.stats.gauge(name, value=1, tags=tags)
 
         self.meter.get_meter().create_observable_gauge.assert_called_once_with(
-            name=full_name(name), callbacks=ANY
+            name=full_name, callbacks=ANY
         )
         self.map[key].attributes == tags
 
-    def test_gauge_existing_metric(self, name):
+    def test_gauge_existing_metric(self, name, full_name):
         self.stats.gauge(name, value=1)
         self.stats.gauge(name, value=2)
 
         self.meter.get_meter().create_observable_gauge.assert_called_once_with(
-            name=full_name(name), callbacks=ANY
+            name=full_name, callbacks=ANY
         )
-        assert self.map[full_name(name)].value == 2
+        assert self.map[full_name].value == 2
 
     @mock.patch("random.random", side_effect=[0.1, 0.9])
     @mock.patch.object(MetricsMap, "set_value")
