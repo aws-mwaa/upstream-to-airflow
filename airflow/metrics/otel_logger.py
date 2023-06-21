@@ -281,6 +281,9 @@ class SafeOtelLogger:
         """Timer context manager returns the duration and can be cancelled."""
         return _OtelTimer(self, stat, tags)
 
+    def flush(self):
+        self.meter.force_flush()
+
 
 class MetricsMap:
     """Stores Otel Instruments."""

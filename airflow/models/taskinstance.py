@@ -1812,7 +1812,7 @@ class TaskInstance(Base, LoggingMixin):
 
         self._run_raw_task(
             mark_success=mark_success, test_mode=test_mode, job_id=job_id, pool=pool, session=session
-        )
+            )
 
     def dry_run(self) -> None:
         """Only Renders Templates for the TI."""

@@ -239,6 +239,10 @@ class DagRun(Base, LoggingMixin):
             external_trigger=self.external_trigger,
         )
 
+    def __exit__(self):
+        if hasattr(Stats, 'flush'):
+            Stats.flush()
+
     @property
     def stats_tags(self) -> dict[str, str]:
         return prune_dict({"dag_id": self.dag_id, "run_type": self.run_type})
