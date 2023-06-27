@@ -259,7 +259,7 @@ class TestAwsEcsExecutor:
         assert "001" in self.executor.active_workers.task_by_key(airflow_key).task_arn
 
     def test_failed_execute_api(self):
-        """Test what happens when Fargate refuses to execute a task."""
+        """Test what happens when ECS refuses to execute a task."""
         self.executor.ecs.run_task.return_value = {
             "tasks": [],
             "failures": [
@@ -281,9 +281,9 @@ class TestAwsEcsExecutor:
     @mock.patch("airflow.executors.base_executor.BaseExecutor.success")
     def test_sync(self, success_mock, fail_mock):
         """Test synch from end-to-end"""
-        after_fargate_json = self.__mock_sync()
-        loaded_fargate_json = BotoTaskSchema().load(after_fargate_json)
-        assert State.SUCCESS == loaded_fargate_json.get_task_state()
+        response_json = self.__mock_sync()
+        formatted_response_json = BotoTaskSchema().load(response_json)
+        assert State.SUCCESS == formatted_response_json.get_task_state()
 
         self.executor.sync_running_tasks()
 
@@ -301,11 +301,11 @@ class TestAwsEcsExecutor:
     @mock.patch("airflow.executors.base_executor.BaseExecutor.success")
     def test_failed_sync(self, success_mock, fail_mock):
         """Test success and failure states"""
-        after_fargate_json = self.__mock_sync()
+        response_json = self.__mock_sync()
 
         # set container's exit code to failure
-        after_fargate_json["containers"][0]["exitCode"] = 100
-        assert State.FAILED == BotoTaskSchema().load(after_fargate_json).get_task_state()
+        response_json["containers"][0]["exitCode"] = 100
+        assert State.FAILED == BotoTaskSchema().load(response_json).get_task_state()
         self.executor.sync()
 
         # ensure that run_task is called correctly as defined by Botocore docs
@@ -352,9 +352,9 @@ class TestAwsEcsExecutor:
 
     def test_terminate(self):
         """Test that executor can shut everything down; forcing all tasks to unnaturally exit."""
-        after_fargate_task = self.__mock_sync()
-        after_fargate_task["containers"][0]["exitCode"] = 100
-        assert State.FAILED == BotoTaskSchema().load(after_fargate_task).get_task_state()
+        response_task = self.__mock_sync()
+        response_task["containers"][0]["exitCode"] = 100
+        assert State.FAILED == BotoTaskSchema().load(response_task).get_task_state()
 
         self.executor.terminate()
 
@@ -376,8 +376,8 @@ class TestAwsEcsExecutor:
             sync_call_count += 1
 
         self.executor.sync = sync_mock
-        after_fargate_task = self.__mock_sync()
-        after_fargate_task["containers"][0]["exitCode"] = 100
+        response_task = self.__mock_sync()
+        response_task["containers"][0]["exitCode"] = 100
         self.executor.end(heartbeat_interval=0)
 
         self.executor.sync = sync_func
@@ -398,26 +398,25 @@ class TestAwsEcsExecutor:
     def __mock_sync(self):
         """Mock ECS such that there's nothing wrong with anything."""
 
-        # create running fargate instance
-        before_fargate_task = mock.Mock(spec=EcsExecutorTask)
-        before_fargate_task.task_arn = "ABC"
-        before_fargate_task.api_failure_count = 0
-        before_fargate_task.get_task_state.return_value = State.RUNNING
+        initial_task = mock.Mock(spec=EcsExecutorTask)
+        initial_task.task_arn = "ABC"
+        initial_task.api_failure_count = 0
+        initial_task.get_task_state.return_value = State.RUNNING
 
         airflow_cmd = mock.Mock(spec=list)
         airflow_key = mock.Mock(spec=tuple)
         airflow_queue = mock.Mock(spec=str)
         airflow_exec_conf = mock.Mock(spec=dict)
         self.executor.active_workers.add_task(
-            before_fargate_task, airflow_key, airflow_queue, airflow_cmd, airflow_exec_conf
+            initial_task, airflow_key, airflow_queue, airflow_cmd, airflow_exec_conf
         )
 
-        after_task_json = {
+        response_task_json = {
             "taskArn": "ABC",
             "desiredStatus": "STOPPED",
             "lastStatus": "STOPPED",
             "startedAt": dt.datetime.now(),
             "containers": [{"name": "some-ecs-container", "lastStatus": "STOPPED", "exitCode": 0}],
         }
-        self.executor.ecs.describe_tasks.return_value = {"tasks": [after_task_json], "failures": []}
-        return after_task_json
+        self.executor.ecs.describe_tasks.return_value = {"tasks": [response_task_json], "failures": []}
+        return response_task_json
