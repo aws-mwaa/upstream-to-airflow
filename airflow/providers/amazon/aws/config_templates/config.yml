@@ -97,4 +97,4 @@ aws_ecs:
       version_added: 2.5.1
       type: string
       example: path.to.your.python_package.variable_name
-      default: airflow.providers.amazon.aws.executors.ecs_fargate_conf.DEFAULT_AWS_ECS_CONFIG
+      default: airflow.providers.amazon.aws.executors.ecs.ecs_executor_conf.DEFAULT_AWS_ECS_CONFIG
