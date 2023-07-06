@@ -32,7 +32,7 @@ from __future__ import annotations
 from airflow.configuration import conf
 
 
-def has_option(section, config_name) -> bool:
+def has_option(section: str, config_name: str) -> bool:
     """Returns True if configuration has a section and an option."""
     if conf.has_option(section, config_name):
         config_val = conf.get(section, config_name)

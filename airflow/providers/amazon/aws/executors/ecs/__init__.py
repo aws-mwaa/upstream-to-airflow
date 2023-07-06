@@ -28,6 +28,7 @@ from copy import deepcopy
 from typing import Any, Callable, Dict, List
 
 import boto3
+from botocore.client import BaseClient
 from marshmallow import EXCLUDE, Schema, ValidationError, fields, post_load
 
 from airflow.configuration import conf
@@ -41,6 +42,8 @@ ExecutorConfigFunctionType = Callable[[CommandType], dict]
 EcsQueuedTask = namedtuple("EcsQueuedTask", ("key", "command", "queue", "executor_config"))
 ExecutorConfigType = Dict[str, Any]
 EcsTaskInfo = namedtuple("EcsTaskInfo", ("cmd", "queue", "config"))
+Tasks = List[Dict[str, Any]]
+Failures = List[Dict[str, str]]
 
 
 class EcsExecutorTask:
@@ -51,7 +54,7 @@ class EcsExecutorTask:
         task_arn: str,
         last_status: str,
         desired_status: str,
-        containers: list[dict[str, Any]],
+        containers: List[Dict[str, Any]],
         started_at: Any | None = None,
         stopped_reason: str | None = None,
     ):
@@ -87,7 +90,7 @@ class EcsExecutorTask:
         all_containers_succeeded = all([x["exit_code"] == 0 for x in self.containers])
         return State.SUCCESS if all_containers_succeeded else State.FAILED
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"({self.task_arn}, {self.last_status}->{self.desired_status}, {self.get_task_state()})"
 
 
@@ -127,10 +130,10 @@ class AwsEcsExecutor(BaseExecutor):
         #         but it is possible it might have some unanticipated consequences.
         self.active_workers: EcsTaskCollection = EcsTaskCollection()
         self.pending_tasks: deque = deque()
-        self.ecs = None
-        self.run_task_kwargs = None
+        self.ecs: BaseClient | None = None
+        self.run_task_kwargs: Dict[str, str] | None = None
 
-    def start(self):
+    def start(self) -> None:
         """Initialize Boto3 ECS Client, and other internal variables."""
         region = conf.get("ecs_executor", "region")
         self.cluster = conf.get("ecs_executor", "cluster")
@@ -142,11 +145,11 @@ class AwsEcsExecutor(BaseExecutor):
         self.ecs = boto3.client("ecs", region_name=region)
         self.run_task_kwargs = self._load_run_kwargs()
 
-    def sync(self):
+    def sync(self) -> None:
         self.sync_running_tasks()
         self.attempt_task_runs()
 
-    def sync_running_tasks(self):
+    def sync_running_tasks(self) -> None:
         """Checks and update state on all running tasks."""
         all_task_arns = self.active_workers.get_all_arns()
         if not all_task_arns:
@@ -164,7 +167,7 @@ class AwsEcsExecutor(BaseExecutor):
         for task in updated_tasks:
             self.__update_running_task(task)
 
-    def __update_running_task(self, task):
+    def __update_running_task(self, task: EcsExecutorTask) -> None:
         self.active_workers.update_task(task)
         # Get state of current task.
         task_state = task.get_task_state()
@@ -180,7 +183,7 @@ class AwsEcsExecutor(BaseExecutor):
             self.log.debug("Task %s marked as %s after running on %s", task_key, task_state, task.task_arn)
             self.active_workers.pop_by_key(task_key)
 
-    def __describe_tasks(self, task_arns):
+    def __describe_tasks(self, task_arns: List[str]) -> Dict[str, List[Tasks | Failures]]:
         all_task_descriptions = {"tasks": [], "failures": []}
         for i in range(0, len(task_arns), self.DESCRIBE_TASKS_BATCH_SIZE):
             batched_task_arns = task_arns[i : i + self.DESCRIBE_TASKS_BATCH_SIZE]
@@ -199,7 +202,7 @@ class AwsEcsExecutor(BaseExecutor):
             all_task_descriptions["failures"].extend(describe_tasks_response["failures"])
         return all_task_descriptions
 
-    def __handle_failed_task(self, task_arn: str, reason: str):
+    def __handle_failed_task(self, task_arn: str, reason: str) -> None:
         """If an API failure occurs, the task is rescheduled."""
         task_key = self.active_workers.arn_to_key[task_arn]
         task_cmd, queue, exec_info = self.active_workers.info_by_key(task_key)
@@ -222,7 +225,7 @@ class AwsEcsExecutor(BaseExecutor):
             self.active_workers.pop_by_key(task_key)
             self.fail(task_key)
 
-    def attempt_task_runs(self):
+    def attempt_task_runs(self) -> None:
         """
         Takes tasks from the pending_tasks queue, and attempts to find an instance to run it on.
 
@@ -258,7 +261,7 @@ class AwsEcsExecutor(BaseExecutor):
 
     def _run_task(
         self, task_id: TaskInstanceKey, cmd: CommandType, queue: str, exec_config: ExecutorConfigType
-    ):
+    ) -> Dict[str, str]:
         """
         Run a queued-up Airflow task.
 
@@ -280,7 +283,7 @@ class AwsEcsExecutor(BaseExecutor):
 
     def _run_task_kwargs(
         self, task_id: TaskInstanceKey, cmd: CommandType, queue: str, exec_config: ExecutorConfigType
-    ) -> dict:
+    ) -> Dict[str, str]:
         """
         Overrides the Airflow command to update the container overrides so kwargs are specific to this task.
 
@@ -292,13 +295,19 @@ class AwsEcsExecutor(BaseExecutor):
         container_override.update(exec_config)
         return run_task_api
 
-    def execute_async(self, key: TaskInstanceKey, command: CommandType, queue=None, executor_config=None):
+    def execute_async(
+        self,
+        key: TaskInstanceKey,
+        command: CommandType,
+        queue: str | None = None,
+        executor_config: ExecutorConfigType = None,
+    ) -> None:
         """Save the task to be executed in the next sync by inserting the commands into a queue."""
         if executor_config and ("name" in executor_config or "command" in executor_config):
             raise ValueError('Executor Config should never override "name" or "command"')
         self.pending_tasks.append(EcsQueuedTask(key, command, queue, executor_config or {}))
 
-    def end(self, heartbeat_interval=10):
+    def end(self, heartbeat_interval: float = 10) -> None:
         """Waits for all currently running tasks to end, and doesn't launch any tasks."""
         while True:
             self.sync()
@@ -306,35 +315,19 @@ class AwsEcsExecutor(BaseExecutor):
                 break
             time.sleep(heartbeat_interval)
 
-    def terminate(self):
+    def terminate(self) -> None:
         """Kill all ECS processes by calling Boto3's StopTask API."""
         for arn in self.active_workers.get_all_arns():
             self.ecs.stop_task(cluster=self.cluster, task=arn, reason="Airflow Executor received a SIGTERM")
         self.end()
 
-    def _load_run_kwargs(self) -> dict:
+    def _load_run_kwargs(self) -> Dict[str, str]:
         fallback = (
             "airflow.providers.amazon.aws.executors.ecs.ecs_executor_config.ECS_EXECUTOR_RUN_TASK_KWARGS"
         )
-        run_kwargs = import_string(
-            conf.get(
-                "ecs_executor",
-                "run_task_kwargs",
-                fallback=fallback,
-            )
-        )
+        run_kwargs = import_string(conf.get("ecs_executor", "run_task_kwargs", fallback=fallback))
         if not isinstance(run_kwargs, dict):
             raise ValueError(f"AWS ECS Executor config value must be a dictionary. Got {type(run_kwargs)}")
-
-        print(
-            "NANI",
-            run_kwargs,
-            conf.get(
-                "ecs_executor",
-                "run_task_kwargs",
-                fallback=fallback,
-            ),
-        )
 
         if (
             "overrides" not in run_kwargs
@@ -348,7 +341,7 @@ class AwsEcsExecutor(BaseExecutor):
             )
         return run_kwargs
 
-    def get_container(self, container_list):
+    def get_container(self, container_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Searches task list for core Airflow container."""
         for container in container_list:
             if container["name"] == self.container_name:
@@ -360,11 +353,11 @@ class EcsTaskCollection:
     """A five-way dictionary between Airflow task ids, Airflow cmds, ECS ARNs, and ECS task objects."""
 
     def __init__(self):
-        self.key_to_arn: dict[TaskInstanceKey, str] = {}
-        self.arn_to_key: dict[str, TaskInstanceKey] = {}
-        self.tasks: dict[str, EcsExecutorTask] = {}
-        self.key_to_failure_counts: dict[TaskInstanceKey, int] = defaultdict(int)
-        self.key_to_task_info: dict[TaskInstanceKey, EcsTaskInfo] = {}
+        self.key_to_arn: Dict[TaskInstanceKey, str] = {}
+        self.arn_to_key: Dict[str, TaskInstanceKey] = {}
+        self.tasks: Dict[str, EcsExecutorTask] = {}
+        self.key_to_failure_counts: Dict[TaskInstanceKey, int] = defaultdict(int)
+        self.key_to_task_info: Dict[TaskInstanceKey, EcsTaskInfo] = {}
 
     def add_task(
         self,
@@ -373,7 +366,7 @@ class EcsTaskCollection:
         queue: str,
         airflow_cmd: CommandType,
         exec_config: ExecutorConfigType,
-    ):
+    ) -> None:
         """Adds a task to the collection."""
         arn = task.task_arn
         self.tasks[arn] = task
@@ -381,7 +374,7 @@ class EcsTaskCollection:
         self.arn_to_key[arn] = airflow_task_key
         self.key_to_task_info[airflow_task_key] = EcsTaskInfo(airflow_cmd, queue, exec_config)
 
-    def update_task(self, task: EcsExecutorTask):
+    def update_task(self, task: EcsExecutorTask) -> None:
         """Updates the state of the given task based on task ARN."""
         self.tasks[task.task_arn] = task
 
@@ -390,7 +383,7 @@ class EcsTaskCollection:
         arn = self.key_to_arn[task_key]
         return self.task_by_arn(arn)
 
-    def task_by_arn(self, arn) -> EcsExecutorTask:
+    def task_by_arn(self, arn: str) -> EcsExecutorTask:
         """Get a task by AWS ARN."""
         return self.tasks[arn]
 
@@ -406,11 +399,11 @@ class EcsTaskCollection:
             del self.key_to_failure_counts[task_key]
         return task
 
-    def get_all_arns(self) -> list[str]:
+    def get_all_arns(self) -> List[str]:
         """Get all AWS ARNs in collection."""
         return list(self.key_to_arn.values())
 
-    def get_all_task_keys(self) -> list[TaskInstanceKey]:
+    def get_all_task_keys(self) -> List[TaskInstanceKey]:
         """Get all Airflow Task Keys in collection."""
         return list(self.key_to_arn.keys())
 
@@ -418,7 +411,7 @@ class EcsTaskCollection:
         """Get the number of times a task has failed given an Airflow Task Key."""
         return self.key_to_failure_counts[task_key]
 
-    def increment_failure_count(self, task_key: TaskInstanceKey):
+    def increment_failure_count(self, task_key: TaskInstanceKey) -> None:
         """Increment the failure counter given an Airflow Task Key."""
         self.key_to_failure_counts[task_key] += 1
 
@@ -426,15 +419,16 @@ class EcsTaskCollection:
         """Get the Airflow Command given an Airflow task key."""
         return self.key_to_task_info[task_key]
 
-    def __getitem__(self, value):
+    def __getitem__(self, value: str) -> EcsExecutorTask:
         """Gets a task by AWS ARN."""
         return self.task_by_arn(value)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Determines the number of tasks in collection."""
         return len(self.tasks)
 
 
+# TODO: If we don't delete the Schemas then fix type hints.
 class BotoContainerSchema(Schema):
     """
     Botocore Serialization Object for ECS 'Container' shape.

@@ -17,8 +17,7 @@
 ---
 aws_ecs:
   description: |
-    This section only applies if you are using the AwsEcsExecutor in
-    Airflow's ``[core]`` configuration.
+    This section only applies if you are using the AwsEcsExecutor in Airflow's ``[core]`` configuration.
     For more information on any of these execution parameters, see the link below:
     https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ecs/client/run_task.html
     For boto3 credential management, see
