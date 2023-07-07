@@ -26,6 +26,8 @@ EcsQueuedTask = namedtuple("EcsQueuedTask", ("key", "command", "queue", "executo
 ExecutorConfigType = Dict[str, Any]
 EcsTaskInfo = namedtuple("EcsTaskInfo", ("cmd", "queue", "config"))
 
+CONFIG_GROUP_NAME = "aws_ecs_executor"
+
 
 class EcsExecutorException(Exception):
     """Thrown when something unexpected has occurred within the ECS ecosystem."""
