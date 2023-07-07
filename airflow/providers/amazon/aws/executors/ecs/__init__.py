@@ -22,9 +22,12 @@ Each Airflow task gets delegated out to an Amazon ECS Task.
 """
 from __future__ import annotations
 
+import json
 import time
 from collections import defaultdict, deque
+from contextlib import suppress
 from copy import deepcopy
+from json import JSONDecodeError
 from typing import Any
 
 import boto3
@@ -33,14 +36,15 @@ from airflow.configuration import conf
 from airflow.executors.base_executor import BaseExecutor
 from airflow.models.taskinstance import TaskInstanceKey
 from airflow.providers.amazon.aws.executors.ecs.boto_schema import BotoDescribeTasksSchema, BotoRunTaskSchema
+from airflow.providers.amazon.aws.executors.ecs.ecs_executor_config import ECS_EXECUTOR_RUN_TASK_KWARGS
 from airflow.providers.amazon.aws.executors.ecs.utils import (
+    CONFIG_GROUP_NAME,
     CommandType,
     EcsExecutorException,
     EcsQueuedTask,
     EcsTaskInfo,
     ExecutorConfigType,
 )
-from airflow.utils.module_loading import import_string
 from airflow.utils.state import State
 
 
@@ -133,9 +137,9 @@ class AwsEcsExecutor(BaseExecutor):
 
     def start(self):
         """Initialize Boto3 ECS Client, and other internal variables."""
-        region = conf.get("ecs_executor", "region")
-        self.cluster = conf.get("ecs_executor", "cluster")
-        self.container_name = conf.get("ecs_executor", "container_name")
+        region = conf.get(CONFIG_GROUP_NAME, "region")
+        self.cluster = conf.get(CONFIG_GROUP_NAME, "cluster")
+        self.container_name = conf.get(CONFIG_GROUP_NAME, "container_name")
         # TODO:: Confirm that defaulting in the init is functionally identical then remove these
         #        next two commented lines.
         # self.active_workers = EcsTaskCollection()
@@ -301,24 +305,21 @@ class AwsEcsExecutor(BaseExecutor):
         self.end()
 
     def _load_run_kwargs(self) -> dict:
-        fallback = (
-            "airflow.providers.amazon.aws.executors.ecs.ecs_executor_config.ECS_EXECUTOR_RUN_TASK_KWARGS"
-        )
-        run_kwargs = import_string(
-            conf.get(
-                "ecs_executor",
-                "run_task_kwargs",
-                fallback=fallback,
-            )
-        )
+        run_kwargs = conf.get(CONFIG_GROUP_NAME, "run_task_template", fallback=ECS_EXECUTOR_RUN_TASK_KWARGS)
+        if isinstance(run_kwargs, str):
+            with suppress(JSONDecodeError):
+                # This will get caught and handled in the next block.
+                run_kwargs = json.loads(run_kwargs)
         if not isinstance(run_kwargs, dict):
             raise ValueError(f"AWS ECS Executor config value must be a dictionary. Got {type(run_kwargs)}")
 
-        if (
-            "overrides" not in run_kwargs
-            or "containerOverrides" not in run_kwargs["overrides"]
-            or not run_kwargs["overrides"]["containerOverrides"]
-            or "command" not in self.get_container(run_kwargs["overrides"]["containerOverrides"])
+        if not all(
+            [
+                "overrides" in run_kwargs,
+                "containerOverrides" in run_kwargs["overrides"],
+                run_kwargs["overrides"]["containerOverrides"],
+                "command" in self.get_container(run_kwargs["overrides"]["containerOverrides"]),
+            ]
         ):
             raise KeyError(
                 "Rendered JSON template does not contain key "
