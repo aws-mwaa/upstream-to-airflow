@@ -441,25 +441,34 @@ class ProvidersManager(LoggingMixin, metaclass=Singleton):
     def initialize_providers_extra_links(self):
         """Lazy initialization of providers extra links."""
         self.initialize_providers_list()
-        self._discover_extra_links()
+        self._extra_link_class_name_set = self._discover_classes("extra_link")
 
     @provider_info_cache("logging")
     def initialize_providers_logging(self):
         """Lazy initialization of providers logging information."""
         self.initialize_providers_list()
-        self._discover_logging()
+        self._logging_class_name_set - self._discover_classes("logging")
 
     @provider_info_cache("secrets_backends")
     def initialize_providers_secrets_backends(self):
         """Lazy initialization of providers secrets_backends information."""
         self.initialize_providers_list()
-        self._discover_secrets_backends()
+        self._secrets_backend_class_name_set = self._discover_classes("secrets-backends")
 
     @provider_info_cache("auth_backends")
     def initialize_providers_auth_backends(self):
         """Lazy initialization of providers API auth_backends information."""
         self.initialize_providers_list()
-        self._discover_auth_backends()
+        self._api_auth_backend_module_names = self._discover_classes("auth-backends")
+
+    def _discover_classes(self, key):
+        ret = set()
+        for provider_package, provider in self._provider_dict.items():
+            if provider.data.get(key):
+                for class_name in provider.data[key]:
+                    if _sanity_check(provider_package, class_name, provider):
+                        ret.add(class_name)
+        return ret
 
     def _discover_all_providers_from_packages(self) -> None:
         """
@@ -917,38 +926,6 @@ class ProvidersManager(LoggingMixin, metaclass=Singleton):
                 hook_class.__name__,
                 e,
             )
-
-    def _discover_extra_links(self) -> None:
-        """Retrieves all extra links defined in the providers."""
-        for provider_package, provider in self._provider_dict.items():
-            if provider.data.get("extra-links"):
-                for extra_link_class_name in provider.data["extra-links"]:
-                    if _sanity_check(provider_package, extra_link_class_name, provider):
-                        self._extra_link_class_name_set.add(extra_link_class_name)
-
-    def _discover_logging(self) -> None:
-        """Retrieve all logging defined in the providers."""
-        for provider_package, provider in self._provider_dict.items():
-            if provider.data.get("logging"):
-                for logging_class_name in provider.data["logging"]:
-                    if _sanity_check(provider_package, logging_class_name, provider):
-                        self._logging_class_name_set.add(logging_class_name)
-
-    def _discover_secrets_backends(self) -> None:
-        """Retrieve all secrets backends defined in the providers."""
-        for provider_package, provider in self._provider_dict.items():
-            if provider.data.get("secrets-backends"):
-                for secrets_backends_class_name in provider.data["secrets-backends"]:
-                    if _sanity_check(provider_package, secrets_backends_class_name, provider):
-                        self._secrets_backend_class_name_set.add(secrets_backends_class_name)
-
-    def _discover_auth_backends(self) -> None:
-        """Retrieve all API auth backends defined in the providers."""
-        for provider_package, provider in self._provider_dict.items():
-            if provider.data.get("auth-backends"):
-                for auth_backend_module_name in provider.data["auth-backends"]:
-                    if _sanity_check(provider_package, auth_backend_module_name + ".init_app", provider):
-                        self._api_auth_backend_module_names.add(auth_backend_module_name)
 
     @provider_info_cache("triggers")
     def initialize_providers_triggers(self):
