@@ -27,7 +27,6 @@ import math
 import os
 import subprocess
 import traceback
-import warnings
 from concurrent.futures import ProcessPoolExecutor
 from typing import TYPE_CHECKING, Any, Mapping, MutableMapping, Optional, Tuple
 
@@ -40,7 +39,7 @@ from setproctitle import setproctitle
 
 import airflow.settings as settings
 from airflow.configuration import conf
-from airflow.exceptions import AirflowException, RemovedInAirflow3Warning
+from airflow.exceptions import AirflowException
 from airflow.executors.base_executor import BaseExecutor
 from airflow.models.taskinstance import TaskInstanceKey
 from airflow.providers.celery.executors.default_celery import DEFAULT_CELERY_CONFIG
@@ -68,17 +67,7 @@ if conf.has_option("celery", "celery_config_options"):
 else:
     celery_configuration = DEFAULT_CELERY_CONFIG
 
-celery_app_name = conf.get("celery", "CELERY_APP_NAME")
-if celery_app_name == "airflow.executors.celery_executor":
-    warnings.warn(
-        "The celery.CELERY_APP_NAME configuration uses deprecated package name: "
-        "'airflow.executors.celery_executor'. "
-        "Change it to `airflow.providers.celery.executors.celery_executor`, and "
-        "update the `-app` flag in your Celery Health Checks "
-        "to use `airflow.providers.celery.executors.celery_executor.app`.",
-        RemovedInAirflow3Warning,
-    )
-app = Celery(celery_app_name, config_source=celery_configuration)
+app = Celery(conf.get("celery", "CELERY_APP_NAME"), config_source=celery_configuration)
 
 
 @celery_import_modules.connect
