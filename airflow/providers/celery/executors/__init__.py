@@ -1,4 +1,3 @@
-#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -17,12 +16,21 @@
 # under the License.
 from __future__ import annotations
 
-from airflow.utils.deprecation_tools import add_deprecated_classes
+import packaging.version
 
-__deprecated_classes = {
-    "default_celery": {
-        "DEFAULT_CELERY_CONFIG": "airflow.providers.celery.executors.default_celery.DEFAULT_CELERY_CONFIG",
-    },
-}
+from airflow.exceptions import AirflowOptionalProviderFeatureException
 
-add_deprecated_classes(__deprecated_classes, __name__)
+try:
+    from airflow import __version__ as airflow_version
+except ImportError:
+    from airflow.version import version as airflow_version
+
+base_version = packaging.version.parse(airflow_version).base_version
+
+if packaging.version.parse(base_version) < packaging.version.parse("2.7.0"):
+    raise AirflowOptionalProviderFeatureException(
+        "Celery Executor from Celery Provider should only be used with Airflow 2.7.0+.\n"
+        f"This is Airflow {airflow_version} and Celery and CeleryKubernetesExecutor are "
+        f"available in the 'airflow.executors' package. You should not use "
+        f"the provider's executors in this version of Airflow."
+    )
