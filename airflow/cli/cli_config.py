@@ -77,7 +77,9 @@ class DefaultHelpParser(argparse.ArgumentParser):
                     )
                     raise ArgumentError(action, message)
                 try:
-                    from airflow.executors.celery_kubernetes_executor import CeleryKubernetesExecutor
+                    from airflow.providers.celery.executors.celery_kubernetes_executor import (
+                        CeleryKubernetesExecutor,
+                    )
 
                     classes += (CeleryKubernetesExecutor,)
                 except ImportError:

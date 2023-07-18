@@ -34,7 +34,7 @@ from celery.result import AsyncResult
 from kombu.asynchronous import set_event_loop
 
 from airflow.configuration import conf
-from airflow.executors import celery_executor_utils, celery_executor
+from airflow.executors import celery_executor, celery_executor_utils
 from airflow.executors.celery_executor import CeleryExecutor
 from airflow.models.baseoperator import BaseOperator
 from airflow.models.dag import DAG
@@ -254,8 +254,8 @@ class TestCeleryExecutor:
     def test_result_backend_sqlalchemy_engine_options(self, mock_celery):
         import importlib
 
-        from airflow.providers.celery.executors import default_celery
         from airflow.executors import celery_executor_utils
+        from airflow.providers.celery.executors import default_celery
 
         # reload celery conf to apply the new config
         importlib.reload(default_celery)
