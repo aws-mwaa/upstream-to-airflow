@@ -69,10 +69,10 @@ else:
     celery_configuration = DEFAULT_CELERY_CONFIG
 
 celery_app_name = conf.get("celery", "CELERY_APP_NAME")
-if celery_app_name == "airflow.executors.celery_executor":
+if celery_app_name == "airflow.providers.celery.executors.celery_executor":
     warnings.warn(
         "The celery.CELERY_APP_NAME configuration uses deprecated package name: "
-        "'airflow.executors.celery_executor'. "
+        "'airflow.providers.celery.executors.celery_executor'. "
         "Change it to `airflow.providers.celery.executors.celery_executor`, and "
         "update the `-app` flag in your Celery Health Checks "
         "to use `airflow.providers.celery.executors.celery_executor.app`.",
