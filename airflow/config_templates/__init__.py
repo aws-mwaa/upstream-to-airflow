@@ -21,7 +21,7 @@ from airflow.utils.deprecation_tools import add_deprecated_classes
 
 __deprecated_classes = {
     "default_celery": {
-        "DEFAULT_CELERY_CONFIG": "airflow.executors.celery_executor.DEFAULT_CELERY_CONFIG",
+        "DEFAULT_CELERY_CONFIG": "airflow.providers.celery.executors.default_celery.DEFAULT_CELERY_CONFIG",
     },
 }
 
