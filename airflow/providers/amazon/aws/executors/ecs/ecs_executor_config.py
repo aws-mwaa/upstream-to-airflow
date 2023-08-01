@@ -32,23 +32,24 @@ https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ecs.h
 from __future__ import annotations
 
 import json
-import warnings
+from json import JSONDecodeError
 
 from airflow.configuration import conf
-from airflow.providers.amazon.aws.executors.ecs import CONFIG_GROUP_NAME
+from airflow.providers.amazon.aws.executors.ecs.utils import CONFIG_GROUP_NAME, EcsConfigKeys
+from airflow.utils.helpers import prune_dict
 
-base_run_task_kwargs = conf.get(CONFIG_GROUP_NAME, "run_task_kwargs", fallback="")
-ECS_EXECUTOR_RUN_TASK_KWARGS = json.loads(str(base_run_task_kwargs))
+base_run_task_kwargs = str(conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.RUN_TASK_KWARGS, fallback=dict()))
+ECS_EXECUTOR_RUN_TASK_KWARGS = json.loads(base_run_task_kwargs)
 
-if conf.has_option(CONFIG_GROUP_NAME, "region"):
+if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
     ECS_EXECUTOR_RUN_TASK_KWARGS = {
-        "cluster": conf.get(CONFIG_GROUP_NAME, "cluster"),
-        "taskDefinition": conf.get(CONFIG_GROUP_NAME, "task_definition"),
-        "platformVersion": conf.get(CONFIG_GROUP_NAME, "platform_version"),
+        "cluster": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.CLUSTER),
+        "taskDefinition": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.TASK_DEFINITION),
+        "platformVersion": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.PLATFORM_VERSION),
         "overrides": {
             "containerOverrides": [
                 {
-                    "name": conf.get(CONFIG_GROUP_NAME, "container_name"),
+                    "name": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.CONTAINER_NAME),
                     # The executor will overwrite the 'command' property during execution.
                     # Must always be the first container!
                     "command": [],
@@ -58,23 +59,39 @@ if conf.has_option(CONFIG_GROUP_NAME, "region"):
         "count": 1,
     }
 
-    if launch_type := conf.get(CONFIG_GROUP_NAME, "launch_type", fallback=False):
+    if launch_type := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, fallback=False):
         ECS_EXECUTOR_RUN_TASK_KWARGS["launchType"] = launch_type
 
-    # Only build this section if 'subnets', 'security_groups', and 'assign_public_ip' are all populated.
-    if all(
+    if any(
         [
-            subnets := conf.get(CONFIG_GROUP_NAME, "subnets", fallback=False),
-            security_groups := conf.get(CONFIG_GROUP_NAME, "security_groups", fallback=False),
-            assign_public_ip := conf.get(CONFIG_GROUP_NAME, "assign_public_ip", fallback=False),
+            subnets := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.SUBNETS, fallback=None),
+            security_groups := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.SECURITY_GROUPS, fallback=None),
+            assign_public_ip := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.ASSIGN_PUBLIC_IP, fallback=None),
         ]
     ):
-        ECS_EXECUTOR_RUN_TASK_KWARGS["networkConfiguration"] = {
-            "awsvpcConfiguration": {
-                "subnets": str(subnets).split(","),
-                "securityGroups": str(security_groups).split(","),
-                "assignPublicIp": assign_public_ip,
+        network_config = prune_dict(
+            {
+                "awsvpcConfiguration": {
+                    "subnets": str(subnets).split(","),
+                    "securityGroups": str(security_groups).split(","),
+                    "assignPublicIp": assign_public_ip,
+                }
             }
-        }
-    else:
-        warnings.warn("`subnets`, `security_groups` and `assignPublicIp` are only used if all are defined.")
+        )
+
+        if "subnets" not in network_config["awsvpcConfiguration"]:
+            raise ValueError("At least one subnet is required to run a task.")
+        if (enable := network_config["awsvpcConfiguration"].get("assignPublicIp")) and enable not in [
+            "ENABLED",
+            "DISABLED",
+        ]:
+            raise ValueError("If assignPublicIp is provided, it must be either `ENABLED` or `DISABLED`.")
+
+        ECS_EXECUTOR_RUN_TASK_KWARGS["networkConfiguration"] = network_config
+
+    try:
+        json.loads(json.dumps(ECS_EXECUTOR_RUN_TASK_KWARGS))
+    except JSONDecodeError:
+        raise ValueError(
+            f"AWS ECS Executor config values must be JSON serializable. Got {ECS_EXECUTOR_RUN_TASK_KWARGS}"
+        )
