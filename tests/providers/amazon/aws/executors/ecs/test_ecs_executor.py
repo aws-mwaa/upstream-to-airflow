@@ -21,12 +21,13 @@ import os
 from unittest import mock
 
 import pytest
+from airflow.configuration import conf
 
 from airflow.executors.base_executor import BaseExecutor
 from airflow.providers.amazon.aws.executors.ecs import (
     AwsEcsExecutor,
     EcsExecutorTask,
-    EcsTaskCollection,
+    EcsTaskCollection, CONFIG_GROUP_NAME, EcsConfigKeys,
 )
 from airflow.providers.amazon.aws.executors.ecs.boto_schema import BotoTaskSchema
 from airflow.utils.state import State
@@ -422,21 +423,21 @@ class TestAwsEcsExecutor:
 
     @staticmethod
     def _set_conf():
-        os.environ["AIRFLOW__ECS_EXECUTOR__REGION"] = "us-west-1"
-        os.environ["AIRFLOW__ECS_EXECUTOR__CLUSTER"] = "some-cluster"
-        os.environ["AIRFLOW__ECS_EXECUTOR__CONTAINER_NAME"] = "some-container-name"
-        os.environ["AIRFLOW__ECS_EXECUTOR__TASK_DEFINITION"] = "some-task-def"
-        os.environ["AIRFLOW__ECS_EXECUTOR__LAUNCH_TYPE"] = "FARGATE"
-        os.environ["AIRFLOW__ECS_EXECUTOR__PLATFORM_VERSION"] = "LATEST"
-        os.environ["AIRFLOW__ECS_EXECUTOR__ASSIGN_PUBLIC_IP"] = "DISABLED"
-        os.environ["AIRFLOW__ECS_EXECUTOR__SECURITY_GROUPS"] = "sg1,sg2"
-        os.environ["AIRFLOW__ECS_EXECUTOR__SUBNETS"] = "sub1,sub2"
+        if not conf.has_section(CONFIG_GROUP_NAME):
+            conf.add_section(CONFIG_GROUP_NAME)
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.REGION, "us-west-1")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.CLUSTER, "some-cluster")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.CONTAINER_NAME, "some-container-name")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.TASK_DEFINITION, "some-task-def")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, "FARGATE")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.PLATFORM_VERSION, "LATEST")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.ASSIGN_PUBLIC_IP, "DISABLED")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.SECURITY_GROUPS, "sg1,sg2")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.SUBNETS, "sub1,sub2")
 
     @staticmethod
     def _unset_conf():
-        for env in os.environ:
-            if env.startswith("AIRFLOW__ECS_EXECUTOR__"):
-                os.environ.pop(env)
+        conf.remove_section(CONFIG_GROUP_NAME)
 
     def _mock_sync(self, expected_state: State = State.SUCCESS) -> None:
         """Mock ECS to the expected state."""
