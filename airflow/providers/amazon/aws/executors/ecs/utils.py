@@ -28,6 +28,13 @@ EcsTaskInfo = namedtuple("EcsTaskInfo", ("cmd", "queue", "config"))
 
 CONFIG_GROUP_NAME = "aws_ecs_executor"
 
+CONFIG_DEFAULTS = {
+    "assign_public_ip": False,
+    "conn_id": "aws_default",
+    "launch_type": "FARGATE",
+    "platform_version": "LATEST",
+}
+
 
 class EcsConfigKeys:
     """Keys loaded into the config which are related to the ECS Executor."""

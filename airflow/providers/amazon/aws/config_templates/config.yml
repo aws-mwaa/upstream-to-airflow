@@ -45,9 +45,9 @@ aws_ecs_executor:
         Assign public ip. Valid values are "ENABLED" or "DISABLED".
         For more info see url to Boto3 docs above.
       version_added: "2.8"
-      type: string
-      example: "ENABLED"
-      default: "DISABLED"
+      type: boolean
+      example: "True"
+      default: "False"
     cluster:
       description: |
         Name of the Amazon ECS Cluster. Required.

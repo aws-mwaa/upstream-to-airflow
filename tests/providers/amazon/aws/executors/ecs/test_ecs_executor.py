@@ -17,17 +17,18 @@
 from __future__ import annotations
 
 import datetime as dt
-import os
 from unittest import mock
 
 import pytest
-from airflow.configuration import conf
 
+from airflow.configuration import conf
 from airflow.executors.base_executor import BaseExecutor
 from airflow.providers.amazon.aws.executors.ecs import (
+    CONFIG_GROUP_NAME,
     AwsEcsExecutor,
+    EcsConfigKeys,
     EcsExecutorTask,
-    EcsTaskCollection, CONFIG_GROUP_NAME, EcsConfigKeys,
+    EcsTaskCollection,
 )
 from airflow.providers.amazon.aws.executors.ecs.boto_schema import BotoTaskSchema
 from airflow.utils.state import State
@@ -431,7 +432,7 @@ class TestAwsEcsExecutor:
         conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.TASK_DEFINITION, "some-task-def")
         conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, "FARGATE")
         conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.PLATFORM_VERSION, "LATEST")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.ASSIGN_PUBLIC_IP, "DISABLED")
+        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.ASSIGN_PUBLIC_IP, "False")
         conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.SECURITY_GROUPS, "sg1,sg2")
         conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.SUBNETS, "sub1,sub2")
 

@@ -35,7 +35,7 @@ import json
 from json import JSONDecodeError
 
 from airflow.configuration import conf
-from airflow.providers.amazon.aws.executors.ecs.utils import CONFIG_GROUP_NAME, EcsConfigKeys
+from airflow.providers.amazon.aws.executors.ecs.utils import CONFIG_DEFAULTS, CONFIG_GROUP_NAME, EcsConfigKeys
 from airflow.utils.helpers import prune_dict
 
 base_run_task_kwargs = str(conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.RUN_TASK_KWARGS, fallback=dict()))
@@ -45,7 +45,11 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
     ECS_EXECUTOR_RUN_TASK_KWARGS = {
         "cluster": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.CLUSTER),
         "taskDefinition": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.TASK_DEFINITION),
-        "platformVersion": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.PLATFORM_VERSION),
+        "platformVersion": conf.get(
+            CONFIG_GROUP_NAME,
+            EcsConfigKeys.PLATFORM_VERSION,
+            fallback=CONFIG_DEFAULTS[EcsConfigKeys.PLATFORM_VERSION],
+        ),
         "overrides": {
             "containerOverrides": [
                 {
@@ -57,16 +61,20 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
             ]
         },
         "count": 1,
+        "launchType": conf.get(
+            CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, fallback=CONFIG_DEFAULTS[EcsConfigKeys.LAUNCH_TYPE]
+        ),
     }
-
-    if launch_type := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, fallback=False):
-        ECS_EXECUTOR_RUN_TASK_KWARGS["launchType"] = launch_type
 
     if any(
         [
             subnets := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.SUBNETS, fallback=None),
             security_groups := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.SECURITY_GROUPS, fallback=None),
-            assign_public_ip := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.ASSIGN_PUBLIC_IP, fallback=None),
+            assign_public_ip := conf.getboolean(
+                CONFIG_GROUP_NAME,
+                EcsConfigKeys.ASSIGN_PUBLIC_IP,
+                fallback=CONFIG_DEFAULTS[EcsConfigKeys.ASSIGN_PUBLIC_IP],
+            ),
         ]
     ):
         network_config = prune_dict(
@@ -74,18 +82,13 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
                 "awsvpcConfiguration": {
                     "subnets": str(subnets).split(","),
                     "securityGroups": str(security_groups).split(","),
-                    "assignPublicIp": assign_public_ip,
+                    "assignPublicIp": "ENABLED" if assign_public_ip else "DISABLED",
                 }
             }
         )
 
         if "subnets" not in network_config["awsvpcConfiguration"]:
             raise ValueError("At least one subnet is required to run a task.")
-        if (enable := network_config["awsvpcConfiguration"].get("assignPublicIp")) and enable not in [
-            "ENABLED",
-            "DISABLED",
-        ]:
-            raise ValueError("If assignPublicIp is provided, it must be either `ENABLED` or `DISABLED`.")
 
         ECS_EXECUTOR_RUN_TASK_KWARGS["networkConfiguration"] = network_config
 
