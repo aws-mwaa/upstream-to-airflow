@@ -17,11 +17,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from unittest import mock
 
 import pytest
 
-from airflow.configuration import conf
 from airflow.executors.base_executor import BaseExecutor
 from airflow.providers.amazon.aws.executors.ecs import (
     CONFIG_GROUP_NAME,
@@ -424,21 +424,21 @@ class TestAwsEcsExecutor:
 
     @staticmethod
     def _set_conf():
-        if not conf.has_section(CONFIG_GROUP_NAME):
-            conf.add_section(CONFIG_GROUP_NAME)
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.REGION, "us-west-1")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.CLUSTER, "some-cluster")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.CONTAINER_NAME, "some-container-name")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.TASK_DEFINITION, "some-task-def")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, "FARGATE")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.PLATFORM_VERSION, "LATEST")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.ASSIGN_PUBLIC_IP, "False")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.SECURITY_GROUPS, "sg1,sg2")
-        conf.set(CONFIG_GROUP_NAME, EcsConfigKeys.SUBNETS, "sub1,sub2")
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.REGION}".upper()] = "us-west-1"
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.CLUSTER}".upper()] = "some-cluster"
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.CONTAINER_NAME}".upper()] = "container-name"
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.TASK_DEFINITION}".upper()] = "some-task-def"
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.LAUNCH_TYPE}".upper()] = "FARGATE"
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.PLATFORM_VERSION}".upper()] = "LATEST"
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.ASSIGN_PUBLIC_IP}".upper()] = "False"
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.SECURITY_GROUPS}".upper()] = "sg1,sg2"
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.SUBNETS}".upper()] = "sub1,sub2"
 
     @staticmethod
     def _unset_conf():
-        conf.remove_section(CONFIG_GROUP_NAME)
+        for env in os.environ:
+            if env.startswith(f"AIRFLOW__{CONFIG_GROUP_NAME.upper()}__"):
+                os.environ.pop(env)
 
     def _mock_sync(self, expected_state: State = State.SUCCESS) -> None:
         """Mock ECS to the expected state."""
