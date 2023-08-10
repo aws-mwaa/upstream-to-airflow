@@ -35,8 +35,14 @@ import json
 from json import JSONDecodeError
 
 from airflow.configuration import conf
-from airflow.providers.amazon.aws.executors.ecs.utils import CONFIG_DEFAULTS, CONFIG_GROUP_NAME, EcsConfigKeys
+from airflow.providers.amazon.aws.executors.ecs.utils import (
+    CONFIG_GROUP_NAME,
+    EcsConfigKeys,
+    get_config_defaults,
+)
 from airflow.utils.helpers import prune_dict
+
+config_defaults = get_config_defaults()
 
 base_run_task_kwargs = str(conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.RUN_TASK_KWARGS, fallback=dict()))
 ECS_EXECUTOR_RUN_TASK_KWARGS = json.loads(base_run_task_kwargs)
@@ -48,7 +54,7 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
         "platformVersion": conf.get(
             CONFIG_GROUP_NAME,
             EcsConfigKeys.PLATFORM_VERSION,
-            fallback=CONFIG_DEFAULTS[EcsConfigKeys.PLATFORM_VERSION],
+            fallback=config_defaults[EcsConfigKeys.PLATFORM_VERSION],
         ),
         "overrides": {
             "containerOverrides": [
@@ -62,7 +68,7 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
         },
         "count": 1,
         "launchType": conf.get(
-            CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, fallback=CONFIG_DEFAULTS[EcsConfigKeys.LAUNCH_TYPE]
+            CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, fallback=config_defaults[EcsConfigKeys.LAUNCH_TYPE]
         ),
     }
 
@@ -73,7 +79,7 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
             assign_public_ip := conf.getboolean(
                 CONFIG_GROUP_NAME,
                 EcsConfigKeys.ASSIGN_PUBLIC_IP,
-                fallback=CONFIG_DEFAULTS[EcsConfigKeys.ASSIGN_PUBLIC_IP],
+                fallback=config_defaults[EcsConfigKeys.ASSIGN_PUBLIC_IP],
             ),
         ]
     ):

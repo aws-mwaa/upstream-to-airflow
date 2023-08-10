@@ -17,8 +17,11 @@
 
 from __future__ import annotations
 
+import os
 from collections import namedtuple
 from typing import Any, Callable, Dict, List
+
+import yaml
 
 CommandType = List[str]
 ExecutorConfigFunctionType = Callable[[CommandType], dict]
@@ -28,12 +31,18 @@ EcsTaskInfo = namedtuple("EcsTaskInfo", ("cmd", "queue", "config"))
 
 CONFIG_GROUP_NAME = "aws_ecs_executor"
 
-CONFIG_DEFAULTS = {
-    "assign_public_ip": False,
-    "conn_id": "aws_default",
-    "launch_type": "FARGATE",
-    "platform_version": "LATEST",
-}
+
+def get_config_defaults():
+    curr_dir = os.path.dirname(os.path.abspath(__file__))
+    config_filename = curr_dir.replace("executors/ecs", "config_templates/config.yml")
+
+    with open(config_filename) as config:
+        options = yaml.safe_load(config)[CONFIG_GROUP_NAME]["options"]
+        file_defaults = {
+            option: default for (option, value) in options.items() if (default := value.get("default"))
+        }
+
+    return file_defaults
 
 
 class EcsConfigKeys:
