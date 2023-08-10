@@ -309,7 +309,9 @@ class AwsEcsExecutor(BaseExecutor):
 
     def _load_run_kwargs(self) -> dict:
         try:
-            from .ecs_executor_config import ECS_EXECUTOR_RUN_TASK_KWARGS
+            from airflow.providers.amazon.aws.executors.ecs.ecs_executor_config import (
+                ECS_EXECUTOR_RUN_TASK_KWARGS,
+            )
 
             self.get_container(ECS_EXECUTOR_RUN_TASK_KWARGS["overrides"]["containerOverrides"])["command"]
         except KeyError:
