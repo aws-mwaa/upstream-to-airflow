@@ -373,6 +373,18 @@ class TestAwsEcsExecutor:
 
     @mock.patch.object(BaseExecutor, "fail")
     @mock.patch.object(BaseExecutor, "success")
+    @mock.patch.object(EcsTaskCollection, "get_all_arns", return_value = [])
+    def test_sync_short_circuits_with_no_arns(self, _, success_mock, fail_mock):
+        self._mock_sync()
+
+        self.executor.sync_running_tasks()
+
+        self.executor.ecs.describe_tasks.assert_not_called()
+        fail_mock.assert_not_called()
+        success_mock.assert_not_called()
+
+    @mock.patch.object(BaseExecutor, "fail")
+    @mock.patch.object(BaseExecutor, "success")
     def test_failed_sync(self, success_mock, fail_mock):
         """Test success and failure states."""
         self._mock_sync(State.FAILED)
@@ -455,6 +467,101 @@ class TestAwsEcsExecutor:
         self.executor.end(heartbeat_interval=0)
 
         self.executor.sync = sync_func
+
+    @mock.patch.object(time, "sleep", return_value=None)
+    def test_end_with_queued_tasks_will_wait(self, mock_sleep):
+        """Test that executor can end successfully; waiting for all tasks to naturally exit."""
+        sync_call_count = 0
+        sync_func = self.executor.sync
+
+        def sync_mock():
+            """Mock won't work here, because we actually want to call the 'sync' func."""
+            nonlocal sync_call_count
+            sync_func()
+            sync_call_count += 1
+
+            if sync_call_count == 1:
+                # On the second pass, remove the pending task. This is the equivalent of using
+                # mock side_effects to simulate a pending task the first time (triggering the
+                # sleep()) and no pending task the second pass, triggering the break and allowing
+                # the executor to shut down.
+                self.executor.active_workers.update_task(
+                    EcsExecutorTask(
+                        ARN2,
+                        "STOPPED",
+                        "STOPPED",
+                        {"exit_code": 0, "name": "some-ecs-container", "last_status": "STOPPED"},
+                    )
+                )
+                self.response_task2_json.update({"desiredStatus": "STOPPED", "lastStatus": "STOPPED"})
+                self.executor.ecs.describe_tasks.return_value = {
+                    "tasks": [self.response_task2_json],
+                    "failures": [],
+                }
+
+        self.executor.sync = sync_mock
+
+        self._add_mock_task(ARN1)
+        self._add_mock_task(ARN2)
+
+        base_response_task_json = {
+            "startedAt": dt.datetime.now(),
+            "containers": [{"name": "some-ecs-container", "lastStatus": "STOPPED", "exitCode": 0}],
+        }
+        self.response_task1_json = {
+            "taskArn": ARN1,
+            "desiredStatus": "STOPPED",
+            "lastStatus": "SUCCESS",
+            **base_response_task_json,
+        }
+        self.response_task2_json = {
+            "taskArn": ARN2,
+            "desiredStatus": "QUEUED",
+            "lastStatus": "QUEUED",
+            **base_response_task_json,
+        }
+
+        self.executor.ecs.describe_tasks.return_value = {
+            "tasks": [self.response_task1_json, self.response_task2_json],
+            "failures": [],
+        }
+
+        self.executor.end(heartbeat_interval=0)
+
+        self.executor.sync = sync_func
+
+        assert sync_call_count == 2
+
+    @pytest.mark.parametrize(
+        "bad_config",
+        [
+            pytest.param({"name": "bad_robot"}, id="executor_config_can_not_overwrite_name"),
+            pytest.param({"command": "bad_robot"}, id="executor_config_can_not_overwrite_command"),
+        ],
+    )
+    def test_executor_config_exceptions(self, bad_config):
+        with pytest.raises(ValueError) as raised:
+            self.executor.execute_async(mock_airflow_key, mock_cmd, executor_config=bad_config)
+
+        assert raised.match('Executor Config should never override "name" or "command"')
+        assert 0 == len(self.executor.pending_tasks)
+
+    def test_container_not_found(self):
+        executor = AwsEcsExecutor()
+        # Force a container name mismatch
+        os.environ[
+            f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.CONTAINER_NAME}".upper()
+        ] = "bad-container-name"
+
+        with pytest.raises(KeyError) as raised:
+            executor.start()
+        assert raised.match(
+            re.escape(
+                "Rendered JSON template does not contain key "
+                '"overrides[containerOverrides][containers][x][command]"'
+            )
+        )
+        assert 0 == len(self.executor.pending_tasks)
 
     def _mock_executor(self) -> None:
         """Mock ECS such that there's nothing wrong."""
