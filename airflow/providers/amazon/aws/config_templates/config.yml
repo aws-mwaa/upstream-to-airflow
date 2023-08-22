@@ -64,6 +64,14 @@ aws_ecs_executor:
       type: string
       example: "ecs_executor_container"
       default: ~
+    count:
+      description: |
+        The number of instantiations of the specified task to place on your cluster.
+        You can specify up to 10 tasks for each call.
+      version_added: "2.8"
+      type: integer
+      example: "2"
+      default: "1"
     launch_type:
       description: |
         Launch type can either be 'FARGATE' OR 'EC2'. For more info see url to
