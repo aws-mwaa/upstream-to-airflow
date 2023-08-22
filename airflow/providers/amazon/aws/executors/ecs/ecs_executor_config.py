@@ -16,6 +16,7 @@
 # under the License.
 
 """
+# TODO  this is no longer the default config, fix this doctring
 Default AWS ECS Executor configuration.
 
 This is the default configuration for calling the ECS `run_task` function.
@@ -35,25 +36,62 @@ import json
 from json import JSONDecodeError
 
 from airflow.configuration import conf
-from airflow.providers.amazon.aws.executors.ecs.utils import CONFIG_DEFAULTS, CONFIG_GROUP_NAME, EcsConfigKeys
+from airflow.providers.amazon.aws.executors.ecs.utils import (
+    CONFIG_DEFAULTS,
+    CONFIG_GROUP_NAME,
+    EcsConfigKeys,
+)
 from airflow.utils.helpers import prune_dict
 
-base_run_task_kwargs = str(conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.RUN_TASK_KWARGS, fallback=dict()))
-ECS_EXECUTOR_RUN_TASK_KWARGS = json.loads(base_run_task_kwargs)
 
-if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
-    ECS_EXECUTOR_RUN_TASK_KWARGS = {
-        "cluster": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.CLUSTER),
-        "taskDefinition": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.TASK_DEFINITION),
-        "platformVersion": conf.get(
-            CONFIG_GROUP_NAME,
-            EcsConfigKeys.PLATFORM_VERSION,
-            fallback=CONFIG_DEFAULTS[EcsConfigKeys.PLATFORM_VERSION],
-        ),
+def _flatten_dict(nested_dict):
+    """
+    Recursively unpack a nested dict and return it as a flat dict.
+
+    For example, _flatten_dict({'a': 'a', 'b': 'b', 'c': {'d': 'd'}}) returns {'a': 'a', 'b': 'b', 'd': 'd'}.
+    """
+    items = []
+    for key, value in nested_dict.items():
+        if isinstance(value, dict):
+            items.extend(_flatten_dict(value).items())
+        else:
+            items.append((key, value))
+    return dict(items)
+
+
+def _load_default_kwargs() -> dict[str, str]:
+    return CONFIG_DEFAULTS
+
+
+def _load_template_kwargs() -> dict[str, str]:
+    run_task_kwargs_value = conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.RUN_TASK_KWARGS, fallback=dict())
+    task_kwargs = json.loads(str(run_task_kwargs_value))
+    return _flatten_dict(task_kwargs)
+
+
+def _load_provided_kwargs() -> dict[str, str]:
+    return prune_dict(
+        {key: conf.get(CONFIG_GROUP_NAME, key, fallback=None) for key in EcsConfigKeys()}
+    )
+
+
+def _build_task_kwargs() -> dict:
+    settings = dict()
+    settings.update(_load_default_kwargs())
+    if not conf.has_section(CONFIG_GROUP_NAME):
+        return settings
+
+    settings.update(_load_template_kwargs())
+    settings.update(_load_provided_kwargs())
+
+    task_kwargs = {
+        "cluster": settings.get(EcsConfigKeys.CLUSTER),
+        "taskDefinition": settings.get(EcsConfigKeys.TASK_DEFINITION),
+        "platformVersion": settings.get(EcsConfigKeys.PLATFORM_VERSION),
         "overrides": {
             "containerOverrides": [
                 {
-                    "name": conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.CONTAINER_NAME),
+                    "name": settings.get(EcsConfigKeys.CONTAINER_NAME),
                     # The executor will overwrite the 'command' property during execution.
                     # Must always be the first container!
                     "command": [],
@@ -61,20 +99,14 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
             ]
         },
         "count": 1,
-        "launchType": conf.get(
-            CONFIG_GROUP_NAME, EcsConfigKeys.LAUNCH_TYPE, fallback=CONFIG_DEFAULTS[EcsConfigKeys.LAUNCH_TYPE]
-        ),
+        "launchType": settings.get(EcsConfigKeys.LAUNCH_TYPE),
     }
 
     if any(
         [
-            subnets := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.SUBNETS, fallback=None),
-            security_groups := conf.get(CONFIG_GROUP_NAME, EcsConfigKeys.SECURITY_GROUPS, fallback=None),
-            assign_public_ip := conf.getboolean(
-                CONFIG_GROUP_NAME,
-                EcsConfigKeys.ASSIGN_PUBLIC_IP,
-                fallback=CONFIG_DEFAULTS[EcsConfigKeys.ASSIGN_PUBLIC_IP],
-            ),
+            subnets := settings.get(EcsConfigKeys.SUBNETS),
+            security_groups := settings.get(EcsConfigKeys.SECURITY_GROUPS),
+            assign_public_ip := settings.get(EcsConfigKeys.ASSIGN_PUBLIC_IP),
         ]
     ):
         network_config = prune_dict(
@@ -82,7 +114,7 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
                 "awsvpcConfiguration": {
                     "subnets": str(subnets).split(",") if subnets else subnets,
                     "securityGroups": str(security_groups).split(",") if security_groups else security_groups,
-                    "assignPublicIp": "ENABLED" if assign_public_ip else "DISABLED",
+                    "assignPublicIp": "ENABLED" if bool(assign_public_ip) else "DISABLED",
                 }
             }
         )
@@ -90,11 +122,16 @@ if conf.has_option(CONFIG_GROUP_NAME, EcsConfigKeys.REGION):
         if "subnets" not in network_config["awsvpcConfiguration"]:
             raise ValueError("At least one subnet is required to run a task.")
 
-        ECS_EXECUTOR_RUN_TASK_KWARGS["networkConfiguration"] = network_config
+        task_kwargs["networkConfiguration"] = network_config
 
     try:
-        json.loads(json.dumps(ECS_EXECUTOR_RUN_TASK_KWARGS))
+        json.loads(json.dumps(task_kwargs))
     except JSONDecodeError:
         raise ValueError(
-            f"AWS ECS Executor config values must be JSON serializable. Got {ECS_EXECUTOR_RUN_TASK_KWARGS}"
+            f"AWS ECS Executor config values must be JSON serializable. Got {task_kwargs}"
         )
+
+    return task_kwargs
+
+
+ECS_EXECUTOR_RUN_TASK_KWARGS = _build_task_kwargs()

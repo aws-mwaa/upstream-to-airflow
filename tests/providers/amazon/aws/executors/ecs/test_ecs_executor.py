@@ -28,6 +28,7 @@ from unittest import mock
 import pytest
 import yaml
 
+from airflow.configuration import conf
 from airflow.executors.base_executor import BaseExecutor
 from airflow.providers.amazon.aws.executors.ecs import (
     CONFIG_GROUP_NAME,
@@ -36,6 +37,7 @@ from airflow.providers.amazon.aws.executors.ecs import (
     EcsTaskCollection,
 )
 from airflow.providers.amazon.aws.executors.ecs.boto_schema import BotoTaskSchema
+from airflow.providers.amazon.aws.executors.ecs.ecs_executor_config import _flatten_dict
 from airflow.providers.amazon.aws.executors.ecs.utils import CONFIG_DEFAULTS, EcsExecutorTask
 from airflow.utils.state import State
 
@@ -645,3 +647,19 @@ class TestEcsExecutorConfig:
             # reloaded
             reload(ecs_executor_config)
         assert raised.match("At least one subnet is required to run a task.")
+
+    def test_flatten_dict(self):
+        os.environ[f"AIRFLOW__{CONFIG_GROUP_NAME}__{EcsConfigKeys.SUBNETS}".upper()] = "sub1,sub2"
+        nested_dict = {"a": "a", "b": "b", "c": {"d": "d"}}
+
+        assert _flatten_dict(nested_dict) == {"a": "a", "b": "b", "d": "d"}
+
+    # The following few tests verify the correct and documented
+    # order of precedence is defaults < template < explicit.
+
+    def test_use_defaults_if_not_provided(self):
+        # Verify none of the values which have a default are set.
+        for (key, value) in CONFIG_DEFAULTS.items():
+            assert f"AIRFLOW__{CONFIG_GROUP_NAME}__{key}".upper() not in os.environ
+
+            assert value == conf.get(CONFIG_GROUP_NAME, key)

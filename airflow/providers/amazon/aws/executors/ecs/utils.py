@@ -56,6 +56,9 @@ class EcsConfigKeys:
     SUBNETS = "subnets"
     TASK_DEFINITION = "task_definition"
 
+    def __iter__(self):
+        return iter({value for (key, value) in EcsConfigKeys.__dict__.items() if not key.startswith("__")})
+
 
 class EcsExecutorException(Exception):
     """Thrown when something unexpected has occurred within the ECS ecosystem."""
