@@ -92,8 +92,13 @@ class AwsEcsExecutor(BaseExecutor):
         self.run_task_kwargs = self._load_run_kwargs()
 
     def sync(self):
-        self.sync_running_tasks()
-        self.attempt_task_runs()
+        try:
+            self.sync_running_tasks()
+            self.attempt_task_runs()
+        except Exception:
+            # We catch any and all exceptions because otherwise it would bubble
+            # up and kill the scheduler process
+            self.log.exception("Failed to sync %s", self.__class__.__name__)
 
     def sync_running_tasks(self):
         """Checks and update state on all running tasks."""
@@ -242,17 +247,29 @@ class AwsEcsExecutor(BaseExecutor):
 
     def end(self, heartbeat_interval=10):
         """Waits for all currently running tasks to end, and doesn't launch any tasks."""
-        while True:
-            self.sync()
-            if not self.active_workers:
-                break
-            time.sleep(heartbeat_interval)
+        try:
+            while True:
+                self.sync()
+                if not self.active_workers:
+                    break
+                time.sleep(heartbeat_interval)
+        except Exception:
+            # We catch any and all exceptions because otherwise it would bubble
+            # up and kill the scheduler process.
+            self.log.exception("Failed to end %s", self.__class__.__name__)
 
     def terminate(self):
         """Kill all ECS processes by calling Boto3's StopTask API."""
-        for arn in self.active_workers.get_all_arns():
-            self.ecs.stop_task(cluster=self.cluster, task=arn, reason="Airflow Executor received a SIGTERM")
-        self.end()
+        try:
+            for arn in self.active_workers.get_all_arns():
+                self.ecs.stop_task(
+                    cluster=self.cluster, task=arn, reason="Airflow Executor received a SIGTERM"
+                )
+            self.end()
+        except Exception:
+            # We catch any and all exceptions because otherwise it would bubble
+            # up and kill the scheduler process.
+            self.log.exception("Failed to terminate %s", self.__class__.__name__)
 
     def _load_run_kwargs(self) -> dict:
         try:
