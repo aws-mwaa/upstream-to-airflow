@@ -97,7 +97,7 @@ class AllEcsConfigKeys(RunTaskKwargsConfigKeys):
 
     AWS_CONN_ID = "conn_id"
     RUN_TASK_KWARGS = "run_task_kwargs"
-    REGION = "region"
+    REGION_NAME = "region_name"
 
 
 class EcsExecutorException(Exception):
