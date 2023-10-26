@@ -28,7 +28,10 @@ from collections import defaultdict, deque
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
+from botocore.exceptions import ClientError
+
 from airflow.configuration import conf
+from airflow.exceptions import AirflowException
 from airflow.executors.base_executor import BaseExecutor
 from airflow.providers.amazon.aws.executors.ecs.boto_schema import BotoDescribeTasksSchema, BotoRunTaskSchema
 from airflow.providers.amazon.aws.executors.ecs.utils import (
@@ -94,10 +97,53 @@ class AwsEcsExecutor(BaseExecutor):
             fallback=CONFIG_DEFAULTS[AllEcsConfigKeys.AWS_CONN_ID],
         )
         region_name = conf.get(CONFIG_GROUP_NAME, AllEcsConfigKeys.REGION_NAME)
+
         from airflow.providers.amazon.aws.hooks.ecs import EcsHook
 
         self.ecs = EcsHook(aws_conn_id=aws_conn_id, region_name=region_name).conn
+
         self.run_task_kwargs = self._load_run_kwargs()
+
+    def start(self):
+        """
+        Make a test API call to verify connectivity and permissions, and that the cluster exists.
+
+        Deliberately use an invalid taskID so there are four potential outcomes, in this order:
+          1. "AccessDeniedException" is raised if there are insufficient permissions.
+          2. "ClusterNotFoundException" is raised if permissions exist but the cluster does not.
+          3. The API responds with a failure message if the cluster is found and there
+             are permissions, but the cluster itself has issues.
+          4. "InvalidParameterException" is raised if the permissions and cluster exist but the task does not.
+
+        The last one is considered a success state for the purposes of this test.
+        """
+        self.log.debug("Starting ECS Executor and testing connectivity...")
+
+        status = ""
+        try:
+            invalid_task_id = "a" * 32
+            self.ecs.stop_task(cluster=self.cluster, task=invalid_task_id)
+
+            # If it got this far, something is wrong.  stop_task() called with an
+            # invalid taskID should have thrown a ClientError.  All known reasons are
+            # covered in the ``except`` block below, and this should never be reached.
+            status = "failed for an unknown reason."
+        except ClientError as ex:
+            error_code = ex.response["Error"]["Code"]
+            error_message = ex.response["Error"]["Message"]
+
+            if "AccessDeniedException" in error_code:
+                status = f"failed due to permissions issues with the following details: {ex}"
+            elif "ClusterNotFoundException" in error_code:
+                status = f"failed due to a cluster issue with the following details: {ex}"
+            elif ("InvalidParameterException" in error_code) and ("task was not found" in error_message):
+                status = "succeeded."
+        finally:
+            log_level = self.log.debug if status == "succeeded." else self.log.exception
+            log_level(msg := ("ECS Executor connectivity test has %s", status))
+
+        if status.startswith("failed"):
+            raise AirflowException(msg)
 
     def sync(self):
         try:
