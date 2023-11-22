@@ -77,6 +77,7 @@ def create_job_definition(role_arn, job_definition_name):
                 "assignPublicIp": "ENABLED",
             },
         },
+        retryStrategy={"attempts": 1},
         jobDefinitionName=job_definition_name,
         platformCapabilities=["FARGATE"],
     )
