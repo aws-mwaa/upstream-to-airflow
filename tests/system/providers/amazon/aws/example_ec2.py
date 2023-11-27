@@ -50,11 +50,14 @@ def get_latest_ami_id():
     # on how they name the new images.  This page should have AL2022 info when
     # it comes available: https://aws.amazon.com/linux/amazon-linux-2022/faqs/
     image_prefix = "Amazon Linux*"
+    root_device_name = "/dev/xvda"
 
     images = boto3.client("ec2").describe_images(
         Filters=[
             {"Name": "description", "Values": [image_prefix]},
-            {"Name": "architecture", "Values": ["arm64"]},
+            {"Name": "architecture", "Values": ["x86_64"]},
+            {"Name": "root-device-type", "Values": ["ebs"]},
+            {"Name": "root-device-name", "Values": [root_device_name]},
         ],
         Owners=["amazon"],
     )
@@ -97,7 +100,7 @@ with DAG(
     image_id = get_latest_ami_id()
 
     config = {
-        "InstanceType": "t4g.micro",
+        "InstanceType": "t3.micro",
         "KeyName": key_name,
         "TagSpecifications": [
             {"ResourceType": "instance", "Tags": [{"Key": "Name", "Value": instance_name}]}
@@ -106,6 +109,9 @@ with DAG(
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html
         "MetadataOptions": {"HttpEndpoint": "enabled", "HttpTokens": "required"},
         "HibernationOptions": {"Configured": True},
+        "BlockDeviceMappings": [
+            {"DeviceName": "/dev/xvda", "Ebs": {"Encrypted": True, "DeleteOnTermination": True}}
+        ],
     }
 
     # EC2CreateInstanceOperator creates and starts the EC2 instances. To test the EC2StartInstanceOperator,
@@ -149,6 +155,7 @@ with DAG(
     reboot_instance = EC2RebootInstanceOperator(
         task_id="reboot_instace",
         instance_ids=instance_id,
+        wait_for_completion=True,
     )
     # [END howto_operator_ec2_reboot_instance]
 
@@ -156,6 +163,7 @@ with DAG(
     hibernate_instance = EC2HibernateInstanceOperator(
         task_id="hibernate_instace",
         instance_ids=instance_id,
+        wait_for_completion=True,
     )
     # [END howto_operator_ec2_hibernate_instance]
 
