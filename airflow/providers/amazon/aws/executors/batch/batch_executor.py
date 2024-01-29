@@ -123,12 +123,12 @@ class AwsBatchExecutor(BaseExecutor):
             raise ValueError('Executor Config should never override "command"')
         try:
             job_id = self._submit_job(key, command, queue, executor_config or {})
+            self.active_workers.add_job(job_id, key)
         except Exception:
             # We catch any and all exceptions because otherwise they would bubble
             # up and kill the scheduler process.
             self.log.exception("Failed to submit Batch job %s", self.__class__.__name__)
 
-        self.active_workers.add_job(job_id, key)
 
     def _submit_job(
         self, key: TaskInstanceKey, cmd: CommandType, queue: str, exec_config: ExecutorConfigType
