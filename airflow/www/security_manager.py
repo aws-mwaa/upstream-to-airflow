@@ -16,10 +16,13 @@
 # under the License.
 from __future__ import annotations
 
+from datetime import datetime
 import json
+import uuid
 from functools import cached_property
 from typing import TYPE_CHECKING, Callable
 
+import boto3
 from flask import g
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -38,6 +41,7 @@ from airflow.auth.managers.utils.fab import (
 )
 from airflow.exceptions import AirflowException
 from airflow.models import Connection, DagRun, Pool, TaskInstance, Variable
+from airflow.providers.amazon.aws.utils.metrics import NAMESPACE, VERSION
 from airflow.security.permissions import (
     ACTION_CAN_ACCESS_MENU,
     ACTION_CAN_READ,
@@ -121,6 +125,10 @@ class AirflowSecurityManagerV2(LoggingMixin):
         """Allow auth managers to register their own views. By default, do nothing."""
         pass
 
+    @cached_property
+    def cloudwatch_client(self):
+        return boto3.client("cloudwatch")
+
     def has_access(
         self, action_name: str, resource_name: str, user=None, resource_pk: str | None = None
     ) -> bool:
@@ -140,6 +148,26 @@ class AirflowSecurityManagerV2(LoggingMixin):
         """
         if not user:
             user = g.user
+
+        if action_name == ACTION_CAN_ACCESS_MENU:
+            raise Exception()
+            self.cloudwatch_client.put_metric_data(
+                Namespace=NAMESPACE,
+                MetricData=[
+                    {
+                        "MetricName": "menu_access",
+                        "Dimensions": [
+                            {
+                                "Name": "version",
+                                "Value": VERSION
+                            },
+                        ],
+                        "Timestamp": datetime.now(),
+                        "Value": 1,
+                        "Unit": "Count",
+                    },
+                ]
+            )
 
         is_authorized_method = self._get_auth_manager_is_authorized_method(resource_name)
         return is_authorized_method(action_name, resource_pk, user)

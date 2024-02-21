@@ -29,6 +29,7 @@ from airflow.providers.amazon.aws.auth_manager.constants import (
     CONF_SECTION_NAME,
 )
 from airflow.providers.amazon.aws.hooks.verified_permissions import VerifiedPermissionsHook
+from airflow.providers.amazon.aws.utils.metrics import emit_metrics
 from airflow.utils.helpers import prune_dict
 from airflow.utils.log.logging_mixin import LoggingMixin
 
@@ -56,6 +57,7 @@ class AwsAuthManagerAmazonVerifiedPermissionsFacade(LoggingMixin):
         """Get the Amazon Verified Permission policy store ID from config."""
         return conf.get_mandatory_value(CONF_SECTION_NAME, CONF_AVP_POLICY_STORE_ID_KEY)
 
+    @emit_metrics
     def is_authorized(
         self,
         *,
