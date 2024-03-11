@@ -74,24 +74,6 @@ def create_app(config=None, testing=False):
     """Create a new instance of Airflow WWW app."""
     connexion_app = connexion.FlaskApp(__name__)
 
-    @connexion_app.app.before_request
-    def before_request():
-        """Exempts the view function associated with '/api/v1' requests from CSRF protection."""
-        if request.path.startswith("/api/v1"):  # TODO: make sure this path is correct
-            view_function = connexion_app.app.view_functions.get(request.endpoint)
-            if view_function:
-                # Exempt the view function from CSRF protection
-                connexion_app.app.extensions["csrf"].exempt(view_function)
-
-    connexion_app.add_middleware(
-        CORSMiddleware,
-        connexion.middleware.MiddlewarePosition.BEFORE_ROUTING,
-        allow_origins=conf.get("api", "access_control_allow_origins"),
-        allow_credentials=True,
-        allow_methods=conf.get("api", "access_control_allow_methods"),
-        allow_headers=conf.get("api", "access_control_allow_headers"),
-    )
-
     flask_app = connexion_app.app
     flask_app.secret_key = conf.get("webserver", "SECRET_KEY")
 
