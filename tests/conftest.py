@@ -1157,12 +1157,11 @@ def clear_lru_cache():
 
 @pytest.fixture(autouse=True)
 def refuse_to_run_test_from_wrongly_named_files(request):
-    dirname: str = request.node.fspath.dirname
-    filename: str = request.node.fspath.basename
+    dirname: str = str(request.node.path.parent)
+    filename: str = str(request.node.path.name)
     is_system_test: bool = "tests/system/" in dirname
     if is_system_test and not (
-        request.node.fspath.basename.startswith("example_")
-        or request.node.fspath.basename.startswith("test_")
+        request.node.path.name.startswith("example_") or request.node.path.name.startswith("test_")
     ):
         raise Exception(
             f"All test method files in tests/system must start with 'example_' or 'test_'. "
@@ -1170,7 +1169,7 @@ def refuse_to_run_test_from_wrongly_named_files(request):
             f"Please rename the file to follow the example_* or test_* pattern if you want to run the tests "
             f"in it."
         )
-    if not is_system_test and not request.node.fspath.basename.startswith("test_"):
+    if not is_system_test and not request.node.path.name.startswith("test_"):
         raise Exception(
             f"All test method files in tests/ must start with 'test_'. Seems that {filename} "
             f"contains {request.function} that looks like a test case. Please rename the file to "
