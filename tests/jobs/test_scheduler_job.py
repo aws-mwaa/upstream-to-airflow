@@ -163,6 +163,18 @@ class TestSchedulerJob:
         self.null_exec = None
         del self.dagbag
 
+    @pytest.fixture
+    def mock_executors(self):
+        default_executor = mock.MagicMock(slots_available=8)
+        default_executor.name = MagicMock(alias="default_exec", module_path="default.exec.module.path")
+        second_executor = mock.MagicMock(slots_available=8)
+        second_executor.name = MagicMock(alias="secondary_exec", module_path="secondary.exec.module.path")
+        with mock.patch("airflow.jobs.job.Job.executors", new_callable=PropertyMock) as executors_mock:
+            with mock.patch("airflow.jobs.job.Job.executor", new_callable=PropertyMock) as executor_mock:
+                executor_mock.return_value = default_executor
+                executors_mock.return_value = [default_executor, second_executor]
+                yield
+
     @pytest.mark.parametrize(
         "configs",
         [
@@ -259,7 +271,7 @@ class TestSchedulerJob:
 
         executor.event_buffer[ti1.key] = State.FAILED, None
 
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db(session=session)
         assert ti1.state == State.FAILED
         scheduler_job.executor.callback_sink.send.assert_not_called()
@@ -271,7 +283,7 @@ class TestSchedulerJob:
         session.commit()
         executor.event_buffer[ti1.key] = State.SUCCESS, None
 
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db(session=session)
         assert ti1.state == State.SUCCESS
         scheduler_job.executor.callback_sink.send.assert_not_called()
@@ -323,7 +335,7 @@ class TestSchedulerJob:
 
         executor.event_buffer[ti1.key] = State.FAILED, None
 
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db(session=session)
         assert ti1.state == State.UP_FOR_RETRY
         scheduler_job.executor.callback_sink.send.assert_not_called()
@@ -334,7 +346,7 @@ class TestSchedulerJob:
         session.commit()
         executor.event_buffer[ti1.key] = State.SUCCESS, None
 
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db(session=session)
         assert ti1.state == State.SUCCESS
         scheduler_job.executor.callback_sink.send.assert_not_called()
@@ -366,6 +378,7 @@ class TestSchedulerJob:
         task_callback = mock.MagicMock()
         mock_task_callback.return_value = task_callback
         scheduler_job = Job(executor=executor)
+        scheduler_job.executors = [executor]
         self.job_runner = SchedulerJobRunner(scheduler_job)
         self.job_runner.processor_agent = mock.MagicMock()
         session = settings.Session()
@@ -376,7 +389,7 @@ class TestSchedulerJob:
 
         executor.event_buffer[ti1.key] = State.FAILED, None
 
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db()
         # The state will remain in queued here and
         # will be set to failed in dag parsing process
@@ -385,7 +398,7 @@ class TestSchedulerJob:
             full_filepath=dag.fileloc,
             simple_task_instance=mock.ANY,
             processor_subdir=None,
-            msg="Executor reports task instance "
+            msg=f"Executor {executor} reports task instance "
             "<TaskInstance: test_process_executor_events_with_callback.dummy_task test [queued]> "
             "finished (failed) although the task says it's queued. (Info: None) "
             "Was the task killed externally?",
@@ -427,7 +440,7 @@ class TestSchedulerJob:
         session.commit()
 
         executor.event_buffer[ti1.key] = State.FAILED, None
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db()
         assert ti1.state == State.FAILED
 
@@ -461,7 +474,7 @@ class TestSchedulerJob:
 
         executor.event_buffer[ti1.key.with_try_number(1)] = State.SUCCESS, None
 
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db(session=session)
         assert ti1.state == State.QUEUED
         scheduler_job.executor.callback_sink.send.assert_not_called()
@@ -474,7 +487,7 @@ class TestSchedulerJob:
 
         executor.event_buffer[ti1.key] = State.SUCCESS, None
 
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db(session=session)
         assert ti1.state == State.QUEUED
         scheduler_job.executor.callback_sink.send.assert_not_called()
@@ -488,7 +501,7 @@ class TestSchedulerJob:
         executor.event_buffer[ti1.key] = State.SUCCESS, None
         executor.has_task = mock.MagicMock(return_value=True)
 
-        self.job_runner._process_executor_events(session=session)
+        self.job_runner._process_executor_events(executor=executor, session=session)
         ti1.refresh_from_db(session=session)
         assert ti1.state == State.QUEUED
         scheduler_job.executor.callback_sink.send.assert_not_called()
@@ -552,16 +565,8 @@ class TestSchedulerJob:
 
         assert isinstance(scheduler_job.executor.callback_sink, PipeCallbackSink)
 
-    @mock.patch("airflow.executors.executor_loader.ExecutorLoader.init_executors")
-    @mock.patch("airflow.executors.executor_loader.ExecutorLoader.get_default_executor")
     @conf_vars({("scheduler", "standalone_dag_processor"): "False"})
-    def test_setup_callback_sink_not_standalone_dag_processor_multiple_executors(
-        self, get_default_executor_mock, init_executors_mock
-    ):
-        default_executor = mock.MagicMock(slots_available=8)
-        second_executor = mock.MagicMock(slots_available=8)
-        init_executors_mock.return_value = [default_executor, second_executor]
-        get_default_executor_mock.return_value = default_executor
+    def test_setup_callback_sink_not_standalone_dag_processor_multiple_executors(self, mock_executors):
         scheduler_job = Job()
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
         self.job_runner._execute()
@@ -577,16 +582,8 @@ class TestSchedulerJob:
 
         assert isinstance(scheduler_job.executor.callback_sink, DatabaseCallbackSink)
 
-    @mock.patch("airflow.jobs.job.Job.executors", new_callable=PropertyMock)
-    @mock.patch("airflow.jobs.job.Job.executor", new_callable=PropertyMock)
     @conf_vars({("scheduler", "standalone_dag_processor"): "True"})
-    def test_setup_callback_sink_standalone_dag_processor_multiple_executors(
-        self, executor_mock, executors_mock
-    ):
-        default_executor = mock.MagicMock(slots_available=8)
-        second_executor = mock.MagicMock(slots_available=8)
-        executor_mock.return_value = default_executor
-        executors_mock.return_value = [default_executor, second_executor]
+    def test_setup_callback_sink_standalone_dag_processor_multiple_executors(self, mock_executors):
         scheduler_job = Job()
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
         self.job_runner._execute()
@@ -594,14 +591,8 @@ class TestSchedulerJob:
         for executor in scheduler_job.executors:
             assert isinstance(executor.callback_sink, DatabaseCallbackSink)
 
-    @mock.patch("airflow.jobs.job.Job.executors", new_callable=PropertyMock)
-    @mock.patch("airflow.jobs.job.Job.executor", new_callable=PropertyMock)
     @conf_vars({("scheduler", "standalone_dag_processor"): "True"})
-    def test_executor_start_called(self, executor_mock, executors_mock):
-        default_executor = mock.MagicMock(slots_available=8)
-        second_executor = mock.MagicMock(slots_available=8)
-        executor_mock.return_value = default_executor
-        executors_mock.return_value = [default_executor, second_executor]
+    def test_executor_start_called(self, mock_executors):
         scheduler_job = Job()
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
         self.job_runner._execute()
@@ -610,13 +601,7 @@ class TestSchedulerJob:
         for executor in scheduler_job.executors:
             executor.start.assert_called_once()
 
-    @mock.patch("airflow.jobs.job.Job.executors", new_callable=PropertyMock)
-    @mock.patch("airflow.jobs.job.Job.executor", new_callable=PropertyMock)
-    def test_executor_job_id_assigned(self, executor_mock, executors_mock):
-        default_executor = mock.MagicMock(slots_available=8)
-        second_executor = mock.MagicMock(slots_available=8)
-        executor_mock.return_value = default_executor
-        executors_mock.return_value = [default_executor, second_executor]
+    def test_executor_job_id_assigned(self, mock_executors):
         scheduler_job = Job()
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
         self.job_runner._execute()
@@ -625,13 +610,7 @@ class TestSchedulerJob:
         for executor in scheduler_job.executors:
             assert executor.job_id == scheduler_job.id
 
-    @mock.patch("airflow.jobs.job.Job.executors", new_callable=PropertyMock)
-    @mock.patch("airflow.jobs.job.Job.executor", new_callable=PropertyMock)
-    def test_executor_debug_dump(self, executor_mock, executors_mock):
-        default_executor = mock.MagicMock(slots_available=8)
-        second_executor = mock.MagicMock(slots_available=8)
-        executor_mock.return_value = default_executor
-        executors_mock.return_value = [default_executor, second_executor]
+    def test_executor_debug_dump(self, mock_executors):
         scheduler_job = Job()
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
         self.job_runner._debug_dump(1, mock.MagicMock())
@@ -663,7 +642,9 @@ class TestSchedulerJob:
         session.merge(ti_with_dagrun)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         assert 1 == len(res)
         res_keys = (x.key for x in res)
         assert ti_with_dagrun.key in res_keys
@@ -700,7 +681,9 @@ class TestSchedulerJob:
         session.add(pool2)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         session.flush()
         assert 3 == len(res)
         res_keys = []
@@ -742,7 +725,9 @@ class TestSchedulerJob:
             ti.state = State.SCHEDULED
             session.merge(ti)
         session.flush()
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         session.flush()
         assert total_executed_ti == len(res)
 
@@ -775,7 +760,9 @@ class TestSchedulerJob:
             session.merge(ti)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=1, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=1, session=session
+        )
         session.flush()
         assert [ti.key for ti in res] == [tis[1].key]
         session.rollback()
@@ -804,7 +791,9 @@ class TestSchedulerJob:
             session.merge(ti)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=1, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=1, session=session
+        )
         session.flush()
         assert [ti.key for ti in res] == [tis[1].key]
         session.rollback()
@@ -841,7 +830,9 @@ class TestSchedulerJob:
 
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
 
         assert 2 == len(res)
         assert ti3.key == res[0].key
@@ -872,7 +863,9 @@ class TestSchedulerJob:
             session.merge(ti)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=1, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=1, session=session
+        )
         session.flush()
         assert [ti.key for ti in res] == [tis[1].key]
         session.rollback()
@@ -885,6 +878,7 @@ class TestSchedulerJob:
             op1 = EmptyOperator(task_id="dummy1")
             op2 = EmptyOperator(task_id="dummy2")
         scheduler_job = Job(executor=MockExecutor())
+        executor = scheduler_job.executor
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
 
         session = settings.Session()
@@ -900,14 +894,18 @@ class TestSchedulerJob:
         session.flush()
 
         # Two tasks w/o pool up for execution and our default pool size is 1
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
         assert 1 == len(res)
 
         ti2.state = State.RUNNING
         session.flush()
 
         # One task w/o pool up for execution and one task running
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
         assert 0 == len(res)
 
         session.rollback()
@@ -936,7 +934,9 @@ class TestSchedulerJob:
             ti.state = State.SCHEDULED
             session.merge(ti)
         session.flush()
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         session.flush()
         assert 0 == len(res)
         tis = dr.get_task_instances(session=session)
@@ -959,7 +959,9 @@ class TestSchedulerJob:
         session.merge(ti)
         session.commit()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         session.flush()
         assert 0 == len(res)
         session.rollback()
@@ -986,7 +988,9 @@ class TestSchedulerJob:
         session.add(infinite_pool)
         session.commit()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         session.flush()
         assert 1 == len(res)
         session.rollback()
@@ -1011,7 +1015,9 @@ class TestSchedulerJob:
         session.add(some_pool)
         session.commit()
         with caplog.at_level(logging.WARNING):
-            self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+            self.job_runner._executable_task_instances_to_queued(
+                executor=scheduler_job.executor, max_tis=32, session=session
+            )
             assert (
                 "Not executing <TaskInstance: "
                 "SchedulerJobTest.test_test_not_enough_pool_slots.cannot_run test [scheduled]>. "
@@ -1045,7 +1051,11 @@ class TestSchedulerJob:
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull)
         session = settings.Session()
 
-        assert 0 == len(self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session))
+        assert 0 == len(
+            self.job_runner._executable_task_instances_to_queued(
+                executor=scheduler_job.executor, max_tis=32, session=session
+            )
+        )
         session.rollback()
 
     def test_tis_for_queued_dagruns_are_not_run(self, dag_maker):
@@ -1069,7 +1079,9 @@ class TestSchedulerJob:
         session.merge(ti1)
         session.merge(ti2)
         session.flush()
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
 
         assert 1 == len(res)
         assert ti2.key == res[0].key
@@ -1085,6 +1097,7 @@ class TestSchedulerJob:
             EmptyOperator(task_id="dummy")
 
         scheduler_job = Job()
+        executor = scheduler_job.executor
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull)
 
         dr1 = dag_maker.create_dagrun(run_type=DagRunType.SCHEDULED)
@@ -1103,7 +1116,9 @@ class TestSchedulerJob:
 
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
 
         assert 1 == len(res)
         res_keys = (x.key for x in res)
@@ -1113,7 +1128,9 @@ class TestSchedulerJob:
         session.merge(ti2)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
 
         assert 0 == len(res)
         session.rollback()
@@ -1144,7 +1161,9 @@ class TestSchedulerJob:
 
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
 
         assert 1 == len(res)
         assert res[0].key == ti3.key
@@ -1178,7 +1197,9 @@ class TestSchedulerJob:
         session.merge(ti2)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
 
         assert 2 == len(res)
 
@@ -1191,7 +1212,9 @@ class TestSchedulerJob:
         session.merge(ti1_2)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
 
         assert 1 == len(res)
 
@@ -1202,7 +1225,9 @@ class TestSchedulerJob:
         session.merge(ti1_3)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
 
         assert 0 == len(res)
 
@@ -1214,7 +1239,9 @@ class TestSchedulerJob:
         session.merge(ti1_3)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
 
         assert 2 == len(res)
 
@@ -1226,7 +1253,9 @@ class TestSchedulerJob:
         session.merge(ti1_3)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=executor, max_tis=32, session=session
+        )
 
         assert 1 == len(res)
         session.rollback()
@@ -1257,7 +1286,9 @@ class TestSchedulerJob:
 
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=100, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=100, session=session
+        )
         assert 0 == len(res)
 
         session.rollback()
@@ -1284,7 +1315,9 @@ class TestSchedulerJob:
 
         # Schedule ti with lower priority,
         # because the one with higher priority is limited by a concurrency limit
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         assert 1 == len(res)
         assert res[0].key == ti2.key
 
@@ -1321,7 +1354,9 @@ class TestSchedulerJob:
 
         # Schedule ti with lower priority,
         # because the one with higher priority is limited by a concurrency limit
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=1, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=1, session=session
+        )
         assert 1 == len(res)
         assert res[0].key == ti2.key
 
@@ -1350,7 +1385,9 @@ class TestSchedulerJob:
 
         # Schedule ti with lower priority,
         # because the one with higher priority is limited by a concurrency limit
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=1, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=1, session=session
+        )
         assert 1 == len(res)
         assert res[0].key == ti1b.key
 
@@ -1379,7 +1416,9 @@ class TestSchedulerJob:
 
         # Schedule ti with higher priority,
         # because it's running in a different DAG run with 0 active tis
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=1, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=1, session=session
+        )
         assert 1 == len(res)
         assert res[0].key == ti2a.key
 
@@ -1412,7 +1451,9 @@ class TestSchedulerJob:
 
         # Schedule ti with lower priority,
         # because the one with higher priority is limited by a concurrency limit
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=1, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=1, session=session
+        )
         assert 1 == len(res)
         assert res[0].key == ti1b.key
 
@@ -1449,7 +1490,9 @@ class TestSchedulerJob:
         ti2.state = State.RUNNING
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=1, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=1, session=session
+        )
         assert 1 == len(res)
         assert res[0].key == ti1.key
 
@@ -1473,7 +1516,9 @@ class TestSchedulerJob:
         set_default_pool_slots(1)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         assert 0 == len(res)
 
         mock_stats_gauge.assert_has_calls(
@@ -1489,7 +1534,9 @@ class TestSchedulerJob:
         set_default_pool_slots(2)
         session.flush()
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
         assert 1 == len(res)
 
         mock_stats_gauge.assert_has_calls(
@@ -1518,7 +1565,9 @@ class TestSchedulerJob:
         ti1 = dr1.get_task_instance(task1.task_id, session)
 
         with patch.object(BaseExecutor, "queue_command") as mock_queue_command:
-            self.job_runner._enqueue_task_instances_with_queued_state([ti1], session=session)
+            self.job_runner._enqueue_task_instances_with_queued_state(
+                [ti1], executor=scheduler_job.executor, session=session
+            )
 
         assert mock_queue_command.called
         session.rollback()
@@ -1542,7 +1591,9 @@ class TestSchedulerJob:
         session.commit()
 
         with patch.object(BaseExecutor, "queue_command") as mock_queue_command:
-            self.job_runner._enqueue_task_instances_with_queued_state([ti], session=session)
+            self.job_runner._enqueue_task_instances_with_queued_state(
+                [ti], executor=scheduler_job.executor, session=session
+            )
         session.flush()
         ti.refresh_from_db(session=session)
         assert ti.state == State.NONE
@@ -1691,11 +1742,14 @@ class TestSchedulerJob:
             ti2.state = State.SCHEDULED
             session.flush()
         scheduler_job.max_tis_per_query = 0
-        scheduler_job.executor = MagicMock(slots_available=36)
+        executor_mock = MagicMock(parallelism=32, slots_available=31)
+        executor_mock.name = MagicMock(alias="exec_alias", module_path="exec.module.path")
+        scheduler_job.executor = executor_mock
+        scheduler_job.executors = [executor_mock]
 
         res = self.job_runner._critical_section_enqueue_task_instances(session)
         # 20 dag runs * 2 tasks each = 40, but limited by number of slots available
-        assert res == 36
+        assert res == 31
         session.rollback()
 
     def test_adopt_or_reset_orphaned_tasks(self, dag_maker):
@@ -1774,32 +1828,28 @@ class TestSchedulerJob:
         assert "Executor doesn't support cleanup of stuck queued tasks. Skipping." in caplog.text
 
     @mock.patch("airflow.dag_processing.manager.DagFileProcessorAgent")
-    def test_executor_end_called(self, mock_processor_agent):
+    def test_executor_end_called(self, mock_processor_agent, mock_executors):
         """
         Test to make sure executor.end gets called with a successful scheduler loop run
         """
-        scheduler_job = Job(executor=mock.MagicMock(slots_available=8))
+        scheduler_job = Job()
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
         run_job(scheduler_job, execute_callable=self.job_runner._execute)
         scheduler_job.executor.end.assert_called_once()
         self.job_runner.processor_agent.end.assert_called_once()
 
-    @mock.patch("airflow.jobs.job.Job.executors", new_callable=PropertyMock)
-    @mock.patch("airflow.jobs.job.Job.executor", new_callable=PropertyMock)
     @mock.patch("airflow.dag_processing.manager.DagFileProcessorAgent")
-    def test_executor_end_called_multiple_executors(
-        self, mock_processor_agent, executor_mock, executors_mock
-    ):
+    def test_executor_end_called_multiple_executors(self, mock_processor_agent, mock_executors):
         """
         Test to make sure executor.end gets called on all executors with a successful scheduler loop run
         """
-        default_executor = mock.MagicMock(slots_available=8)
-        second_executor = mock.MagicMock(slots_available=8)
-        executor_mock.return_value = default_executor
-        executors_mock.return_value = [default_executor, second_executor]
+        # default_executor = mock.MagicMock(slots_available=8)
+        # second_executor = mock.MagicMock(slots_available=8)
+        # executor_mock.return_value = default_executor
+        # executors_mock.return_value = [default_executor, second_executor]
         scheduler_job = Job()
-        assert scheduler_job.executor is default_executor
-        assert scheduler_job.executors == [default_executor, second_executor]
+        # assert scheduler_job.executor is default_executor
+        # assert scheduler_job.executors == [default_executor, second_executor]
 
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
         run_job(scheduler_job, execute_callable=self.job_runner._execute)
@@ -1827,22 +1877,13 @@ class TestSchedulerJob:
         scheduler_job.executor.end.assert_called_once()
         mock_processor_agent.return_value.end.reset_mock(side_effect=True)
 
-    @mock.patch("airflow.jobs.job.Job.executors", new_callable=PropertyMock)
-    @mock.patch("airflow.jobs.job.Job.executor", new_callable=PropertyMock)
     @mock.patch("airflow.dag_processing.manager.DagFileProcessorAgent")
-    def test_cleanup_methods_all_called_multiple_executors(
-        self, mock_processor_agent, executor_mock, executors_mock
-    ):
+    def test_cleanup_methods_all_called_multiple_executors(self, mock_processor_agent, mock_executors):
         """
         Test to make sure all cleanup methods are called when the scheduler loop has an exception
         """
-        default_executor = mock.MagicMock(slots_available=8)
-        second_executor = mock.MagicMock(slots_available=8)
-        executor_mock.return_value = default_executor
-        executors_mock.return_value = [default_executor, second_executor]
         scheduler_job = Job()
-        assert scheduler_job.executor is default_executor
-        assert scheduler_job.executors == [default_executor, second_executor]
+
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull, num_runs=1)
         self.job_runner._run_scheduler_loop = mock.MagicMock(side_effect=RuntimeError("oops"))
         mock_processor_agent.return_value.end.side_effect = RuntimeError("double oops")
@@ -2375,7 +2416,9 @@ class TestSchedulerJob:
         scheduler_job = Job()
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull)
 
-        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        res = self.job_runner._executable_task_instances_to_queued(
+            executor=scheduler_job.executor, max_tis=32, session=session
+        )
 
         assert [] == res
 
@@ -2745,7 +2788,7 @@ class TestSchedulerJob:
             self.job_runner._schedule_dag_run(dr, session)
             session.flush()
             task_instances_list = self.job_runner._executable_task_instances_to_queued(
-                max_tis=32, session=session
+                executor=scheduler_job.executor, max_tis=32, session=session
             )
 
             assert len(task_instances_list) == 1
@@ -2790,7 +2833,7 @@ class TestSchedulerJob:
             self.job_runner._schedule_dag_run(dr, session)
 
         task_instances_list = self.job_runner._executable_task_instances_to_queued(
-            max_tis=32, session=session
+            executor=scheduler_job.executor, max_tis=32, session=session
         )
 
         # As tasks require 2 slots, only 3 can fit into 6 available
@@ -2855,9 +2898,11 @@ class TestSchedulerJob:
         for dr in _create_dagruns(dag_d2):
             self.job_runner._schedule_dag_run(dr, session)
 
-        self.job_runner._executable_task_instances_to_queued(max_tis=2, session=session)
+        self.job_runner._executable_task_instances_to_queued(
+            executor=self.null_exec, max_tis=2, session=session
+        )
         task_instances_list2 = self.job_runner._executable_task_instances_to_queued(
-            max_tis=2, session=session
+            executor=self.null_exec, max_tis=2, session=session
         )
 
         # Make sure we get TIs from a non-full pool in the 2nd list
@@ -2917,7 +2962,7 @@ class TestSchedulerJob:
         session.flush()
 
         task_instances_list = self.job_runner._executable_task_instances_to_queued(
-            max_tis=32, session=session
+            executor=self.null_exec, max_tis=32, session=session
         )
 
         # Only second and third
@@ -4076,6 +4121,7 @@ class TestSchedulerJob:
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull)
 
         scheduler_job.executor = MockExecutor(do_update=False)
+        scheduler_job.executors = [MockExecutor(do_update=False)]
         self.job_runner.processor_agent = mock.MagicMock(spec=DagFileProcessorAgent)
 
         num_queued = self.job_runner._do_scheduling(session)
@@ -4224,6 +4270,7 @@ class TestSchedulerJob:
         self.job_runner = SchedulerJobRunner(job=scheduler_job, subdir=os.devnull)
 
         scheduler_job.executor = MockExecutor(do_update=False)
+        scheduler_job.executors = [MockExecutor(do_update=False)]
         self.job_runner.processor_agent = mock.MagicMock(spec=DagFileProcessorAgent)
 
         num_queued = self.job_runner._do_scheduling(session)

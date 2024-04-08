@@ -24,7 +24,7 @@ import signal
 import sys
 import time
 import warnings
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import lru_cache, partial
@@ -83,6 +83,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Query, Session
 
     from airflow.dag_processing.manager import DagFileProcessorAgent
+    from airflow.executors.base_executor import BaseExecutor
     from airflow.models.taskinstance import TaskInstanceKey
     from airflow.utils.sqlalchemy import (
         CommitProhibitorGuard,
@@ -291,9 +292,11 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             {(dag_id, run_id, task_id): count for task_id, run_id, dag_id, count in ti_concurrency_query}
         )
 
-    def _executable_task_instances_to_queued(self, max_tis: int, session: Session) -> list[TI]:
+    def _executable_task_instances_to_queued(
+        self, max_tis: int, executor: BaseExecutor, session: Session
+    ) -> list[TI]:
         """
-        Find TIs that are ready for execution based on conditions.
+        Find TIs that are ready for execution for a particular executor based on conditions.
 
         Conditions include:
         - pool limits
@@ -376,6 +379,24 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 .order_by(-TI.priority_weight, DR.execution_date, TI.map_index)
             )
 
+            # Add where comparisons for the current executor we're scheduling for
+            # 1) Check for executor class name
+            query_or_args = [TI.executor == executor.__class__.__name__]
+
+            # 2) If we have an executor name, which we should, also query for the
+            # executor alias and module path
+            if executor.name:
+                query_or_args.append(TI.executor == executor.name.alias)
+                query_or_args.append(TI.executor == executor.name.module_path)
+
+            # 3) If this is the default executor (stored in self.job.executor), also query for tasks which do
+            # not specify a particular executor.
+            # TODO: Don't check types like this
+            if type(executor) == type(self.job.executor):  # noqa: E721
+                query = query.where(or_(*query_or_args, TI.executor.is_(None)))
+            else:
+                query = query.where(or_(*query_or_args))
+
             if starved_pools:
                 query = query.where(not_(TI.pool.in_(starved_pools)))
 
@@ -392,7 +413,6 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     starved_tasks_task_dagrun_concurrency,
                 )
                 query = query.where(not_(task_filter))
-
             query = query.limit(max_tis)
 
             timer = Stats.timer("scheduler.critical_section_query_duration")
@@ -619,7 +639,9 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             make_transient(ti)
         return executable_tis
 
-    def _enqueue_task_instances_with_queued_state(self, task_instances: list[TI], session: Session) -> None:
+    def _enqueue_task_instances_with_queued_state(
+        self, task_instances: list[TI], executor: BaseExecutor, session: Session
+    ) -> None:
         """
         Enqueue task_instances which should have been set to queued with the executor.
 
@@ -638,9 +660,11 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
             priority = ti.priority_weight
             queue = ti.queue
-            self.log.info("Sending %s to executor with priority %s and queue %s", ti.key, priority, queue)
+            self.log.info(
+                "Sending %s to %s with priority %s and queue %s", ti.key, executor.name, priority, queue
+            )
 
-            self.job.executor.queue_command(
+            executor.queue_command(
                 ti,
                 command,
                 priority=priority,
@@ -657,30 +681,73 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         2. Change the state for the TIs above atomically.
         3. Enqueue the TIs in the executor.
 
-        HA note: This function is a "critical section" meaning that only a single executor process can execute
-        this function at the same time. This is achieved by doing ``SELECT ... from pool FOR UPDATE``. For DBs
-        that support NOWAIT, a "blocked" scheduler will skip this and continue on with other tasks (creating
-        new DAG runs, progressing TIs from None to SCHEDULED etc.); DBs that don't support this (such as
-        MariaDB or MySQL 5.x) the other schedulers will wait for the lock before continuing.
+        Hybrid executors note: We do these steps for as many executors as we can up until we reach
+        max_tis_per_query so that we fit in as many individual task scheduling decisions as possible each
+        scheduling loop.
+
+        HA note: This function is a "critical section" meaning that only a single scheduler process can
+        execute this function at the same time. This is achieved by doing
+        ``SELECT ... from pool FOR UPDATE``. For DBs that support NOWAIT, a "blocked" scheduler will skip
+        this and continue on with other tasks (creating new DAG runs, progressing TIs from None to SCHEDULED
+        etc.); DBs that don't support this (such as MariaDB or MySQL 5.x) the other schedulers will wait for
+        the lock before continuing.
 
         :param session:
         :return: Number of task instance with state changed.
         """
+        # NOTE: The max_tis number here matters only for the executor we're currently scheduling for.
+        # In that, if executor A has 3 slots available, we should only try schedule tasks to that executor.
+        # This means we have to loop for each executor:
+        # 1. get slots available
+        # 2. move executable tasks to queued
+        # 3. enqueue tasks with executor
+
+        queued_tis_total = []
+        # The user can either request a certain number of tis to schedule per main scheduler loop (default
+        # currently non-zero). If that value has been set to zero, that means use the value of
+        # core.parallelism (or however many free slots are left). core.parallelism represents the max number
+        # of running TIs per scheduler. For historical reasons this value is stored in the executor who's job
+        # it was to controlled/enforced it. However, with multiple executors, any of which can run up to
+        # core.parallelism TIs individually, we need to make sure in the scheduler now that we don't
+        # schedule more than core.parallelism totally across all executors.
         if self.job.max_tis_per_query == 0:
-            max_tis = self.job.executor.slots_available
+            max_tis_left = min(self._get_all_available_executor_slots(), conf.getint("core", "parallelism"))
         else:
-            max_tis = min(self.job.max_tis_per_query, self.job.executor.slots_available)
-        queued_tis = self._executable_task_instances_to_queued(max_tis, session=session)
+            max_tis_left = self.job.max_tis_per_query
+        # TODO: Should we randomize or round-robin this loop so that executors early in the list don't starve
+        # those later in the list? Or is the scheduler loop fast enough that it won't matter?
+        for executor in self.job.executors:
+            if not executor.slots_available:
+                # An executor may have zero slots left while other executors may have some so continue to the
+                # next executor.
+                continue
+            # Schedule as much as this current executor has room for, up to the max per query we have left
+            max_tis = min(max_tis_left, executor.slots_available)
 
-        self._enqueue_task_instances_with_queued_state(queued_tis, session=session)
-        return len(queued_tis)
+            queued_tis = self._executable_task_instances_to_queued(
+                max_tis, session=session, executor=executor
+            )
+            queued_tis_total.extend(queued_tis)
+            max_tis_left = max_tis_left - len(queued_tis)
 
-    def _process_executor_events(self, session: Session) -> int:
+            self.log.debug(
+                # TODO: verify the below works in all cases
+                # f"Trying to enqueue tasks: {queued_tis} for executor: {executor.name or executor.__class__.__name__}"
+                "Trying to enqueue tasks: %s for executor: %s",
+                queued_tis,
+                executor,
+            )
+
+            self._enqueue_task_instances_with_queued_state(queued_tis, executor, session=session)
+
+        return len(queued_tis_total)
+
+    def _process_executor_events(self, executor: BaseExecutor, session: Session) -> int:
         """Respond to executor events."""
         if not self._standalone_dag_processor and not self.processor_agent:
             raise ValueError("Processor agent is not started.")
         ti_primary_key_to_try_number_map: dict[tuple[str, str, str, int], int] = {}
-        event_buffer = self.job.executor.get_event_buffer()
+        event_buffer = executor.get_event_buffer()
         tis_with_right_state: list[TaskInstanceKey] = []
 
         # Report execution
@@ -688,7 +755,9 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             # We create map (dag_id, task_id, execution_date) -> in-memory try_number
             ti_primary_key_to_try_number_map[ti_key.primary] = ti_key.try_number
 
-            self.log.info("Received executor event with state %s for task instance %s", state, ti_key)
+            self.log.info(
+                "Received event from executor %s with state %s for task instance %s", executor, state, ti_key
+            )
             if state in (TaskInstanceState.FAILED, TaskInstanceState.SUCCESS, TaskInstanceState.QUEUED):
                 tis_with_right_state.append(ti_key)
 
@@ -716,8 +785,8 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             msg = (
                 "TaskInstance Finished: dag_id=%s, task_id=%s, run_id=%s, map_index=%s, "
                 "run_start_date=%s, run_end_date=%s, "
-                "run_duration=%s, state=%s, executor_state=%s, try_number=%s, max_tries=%s, job_id=%s, "
-                "pool=%s, queue=%s, priority_weight=%d, operator=%s, queued_dttm=%s, "
+                "run_duration=%s, state=%s, executor=%s, executor_state=%s, try_number=%s, max_tries=%s, "
+                "job_id=%s, pool=%s, queue=%s, priority_weight=%d, operator=%s, queued_dttm=%s, "
                 "queued_by_job_id=%s, pid=%s"
             )
             self.log.info(
@@ -730,6 +799,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 ti.end_date,
                 ti.duration,
                 ti.state,
+                executor,
                 state,
                 try_number,
                 ti.max_tries,
@@ -756,7 +826,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             ti_queued = ti.try_number == buffer_key.try_number and ti.state == TaskInstanceState.QUEUED
             ti_requeued = (
                 ti.queued_by_job_id != self.job.id  # Another scheduler has queued this task again
-                or self.job.executor.has_task(ti)  # This scheduler has this task already
+                or executor.has_task(ti)  # This scheduler has this task already
             )
 
             if ti_queued and not ti_requeued:
@@ -765,10 +835,10 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     tags={"dag_id": ti.dag_id, "task_id": ti.task_id},
                 )
                 msg = (
-                    "Executor reports task instance %s finished (%s) although the "
+                    "Executor %s reports task instance %s finished (%s) although the "
                     "task says it's %s. (Info: %s) Was the task killed externally?"
                 )
-                self._task_context_logger.error(msg, ti, state, ti.state, info, ti=ti)
+                self._task_context_logger.error(msg, executor.name, ti, state, ti.state, info, ti=ti)
 
                 # Get task from the Serialized DAG
                 try:
@@ -783,12 +853,12 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     request = TaskCallbackRequest(
                         full_filepath=ti.dag_model.fileloc,
                         simple_task_instance=SimpleTaskInstance.from_ti(ti),
-                        msg=msg % (ti, state, ti.state, info),
+                        msg=msg % (executor, ti, state, ti.state, info),
                         processor_subdir=ti.dag_model.processor_subdir,
                     )
-                    self.job.executor.send_callback(request)
+                    executor.send_callback(request)
                 else:
-                    ti.handle_failure(error=msg % (ti, state, ti.state, info), session=session)
+                    ti.handle_failure(error=msg % (executor, ti, state, ti.state, info), session=session)
 
         return len(event_buffer)
 
@@ -977,11 +1047,21 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     self.processor_agent.wait_until_finished()
 
                 with create_session() as session:
+                    # This will schedule for as many executors as possible.
                     num_queued_tis = self._do_scheduling(session)
 
-                    self.job.executor.heartbeat()
+                    # Heartbeat all executors, even if they're not receiving new tasks this loop. It will be
+                    # either a no-op, or they will check-in on currently running tasks and send out new
+                    # events to be processed below.
+                    for executor in self.job.executors:
+                        executor.heartbeat()
+
+                    # TODO: I'm not sure why we expunge here. Do we need to do it after each individual
+                    # executor is heartbeated? Or can it be done once after all executors are done.
                     session.expunge_all()
-                    num_finished_events = self._process_executor_events(session=session)
+                    num_finished_events = 0
+                    for executor in self.job.executors:
+                        num_finished_events += self._process_executor_events(executor, session=session)
                 if self.processor_agent:
                     self.processor_agent.heartbeat()
 
@@ -1080,16 +1160,19 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             session.expunge_all()
             # END: schedule TIs
 
-            if self.job.executor.slots_available <= 0:
+            # TODO: Does it matter if one executor is empty and another has space? As it is written below,
+            # we will attempt to schedule still if some executors are full but not all.
+            total_free_executor_slots = sum([executor.slots_available for executor in self.job.executors])
+            if total_free_executor_slots <= 0:
                 # We know we can't do anything here, so don't even try!
-                self.log.debug("Executor full, skipping critical section")
+                self.log.debug("All executor full, skipping critical section")
                 num_queued_tis = 0
             else:
                 try:
                     timer = Stats.timer("scheduler.critical_section_duration")
                     timer.start()
 
-                    # Find anything TIs in state SCHEDULED, try to QUEUE it (send it to the executor)
+                    # Find anything TIs in state SCHEDULED, try to QUEUE it (send it to the executors)
                     num_queued_tis = self._critical_section_enqueue_task_instances(session=session)
 
                     # Make sure we only sent this metric if we obtained the lock, otherwise we'll skew the
@@ -1471,6 +1554,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             self.log.warning("The DAG disappeared before verifying integrity: %s. Skipping.", dag_run.dag_id)
             return callback
         # TODO[HA]: Rename update_state -> schedule_dag_run, ?? something else?
+        # from pdb import set_trace; set_trace()
         schedulable_tis, callback_to_run = dag_run.update_state(session=session, execute_callbacks=False)
 
         if self._should_update_dag_next_dagruns(dag, dag_model, last_dag_run=dag_run, session=session):
@@ -1820,3 +1904,23 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
         updated_count = sum(self._set_orphaned(dataset) for dataset in orphaned_dataset_query)
         Stats.gauge("dataset.orphaned", updated_count)
+
+    def _get_all_available_executor_slots(self) -> int:
+        """Return the sum of available slots across all executors."""
+        slots_available: int = 0
+
+        for executor in self.job.executors:
+            slots_available += executor.slots_available
+
+        return slots_available
+
+    def _executor_to_tis(self, tis: list[TaskInstance]) -> dict[str, list[TaskInstance]]:
+        # Organize TIs into lists per their respective executor
+        _executor_to_tis: defaultdict[str, list[TaskInstance]] = defaultdict(list)
+        for ti in tis:
+            if ti.executor:
+                _executor_to_tis[str(ti.executor)].append(ti)
+            else:
+                _executor_to_tis[self.job.executor.__class__.__name__].append(ti)
+
+        return _executor_to_tis
