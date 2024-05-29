@@ -187,7 +187,7 @@ Then you can build your image by ``cd``-ing to the directory with the Dockerfile
    docker build -t my-airflow-image \
     --build-arg aws_default_region=YOUR_DEFAULT_REGION .
 
-For users running docker on an Apple silicon, you must specify the arch using ``docker buildx``.
+For users running docker on an Apple silicon chip, you must specify the arch using ``docker buildx``.
 
 .. code-block:: bash
 
