@@ -57,7 +57,6 @@ if TYPE_CHECKING:
 
     from sqlalchemy.orm.session import Session
 
-    from airflow.executors.base_executor import BaseExecutor
     from airflow.models.abstractoperator import AbstractOperator
     from airflow.models.taskinstance import TaskInstanceKey
 
@@ -465,7 +464,6 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
     def _process_backfill_task_instances(
         self,
         ti_status: _DagRunTaskStatus,
-        executor: BaseExecutor,
         pickle_id: int | None,
         start_date: datetime.datetime | None = None,
         *,
@@ -554,6 +552,7 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
                     flag_upstream_failed=True,
                 )
 
+                executor = ExecutorLoader.load_executor(str(ti.executor) if ti.executor else None)
                 # Is the task runnable? -- then run it
                 # the dependency checker can change states of tis
                 if ti.are_dependencies_met(
@@ -720,7 +719,8 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
                 only_if_necessary=True,
             )
             # execute the tasks in the queue
-            executor.heartbeat()
+            for executor in self.job.executors:
+                executor.heartbeat()
 
             # If the set of tasks that aren't ready ever equals the set of
             # tasks to run and there are no running tasks then the backfill
@@ -841,7 +841,6 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
         self,
         dagrun_infos: Iterable[DagRunInfo],
         ti_status: _DagRunTaskStatus,
-        executor: BaseExecutor,
         pickle_id: int | None,
         start_date: datetime.datetime | None,
         session: Session = NEW_SESSION,
@@ -853,7 +852,6 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
 
         :param dagrun_infos: Schedule information for dag runs
         :param ti_status: internal BackfillJobRunner status structure to tis track progress
-        :param executor: the executor to use, it must be previously started
         :param pickle_id: numeric id of the pickled dag, None if not pickled
         :param start_date: backfill start date
         :param session: the current session object
@@ -868,7 +866,6 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
 
         processed_dag_run_dates = self._process_backfill_task_instances(
             ti_status=ti_status,
-            executor=executor,
             pickle_id=pickle_id,
             start_date=start_date,
             session=session,
@@ -955,17 +952,20 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
             return
         pickle_id = None
 
-        executor_class, _ = ExecutorLoader.import_default_executor_cls()
+        _support_pickling = []
 
-        if not self.donot_pickle and executor_class.supports_pickling:
+        for executor in self.job.executors:
+            _support_pickling.append(executor.supports_pickling)
+
+            executor = self.job.executor
+            executor.job_id = self.job.id
+            executor.start()
+
+        if not self.donot_pickle and all(_support_pickling):
             pickle = DagPickle(self.dag)
             session.add(pickle)
             session.commit()
             pickle_id = pickle.id
-
-        executor = self.job.executor
-        executor.job_id = self.job.id
-        executor.start()
 
         ti_status.total_runs = len(dagrun_infos)  # total dag runs in backfill
 
@@ -980,7 +980,6 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
                 self._execute_dagruns(
                     dagrun_infos=dagrun_infos_to_process,
                     ti_status=ti_status,
-                    executor=executor,
                     pickle_id=pickle_id,
                     start_date=start_date,
                     session=session,
@@ -1013,7 +1012,8 @@ class BackfillJobRunner(BaseJobRunner, LoggingMixin):
             raise
         finally:
             session.commit()
-            executor.end()
+            for executor in self.job.executors:
+                executor.end()
 
         self.log.info("Backfill done for DAG %s. Exiting.", self.dag)
 

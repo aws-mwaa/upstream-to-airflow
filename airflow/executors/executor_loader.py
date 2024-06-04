@@ -100,7 +100,7 @@ class ExecutorLoader:
         executor_names_raw = conf.get_mandatory_list_value("core", "EXECUTOR")
 
         # AIP-61 is WIP. Unblock configuring multiple executors when the feature is ready to launch
-        cls.block_use_of_hybrid_exec(executor_names_raw)
+        # cls.block_use_of_hybrid_exec(executor_names_raw)
 
         executor_names = []
         for name in executor_names_raw:

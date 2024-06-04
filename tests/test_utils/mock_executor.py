@@ -31,6 +31,8 @@ class MockExecutor(BaseExecutor):
     TestExecutor is used for unit testing purposes.
     """
 
+    supports_pickling = False
+
     def __init__(self, do_update=True, *args, **kwargs):
         self.do_update = do_update
         self._running = []
@@ -97,3 +99,11 @@ class MockExecutor(BaseExecutor):
         """
         assert isinstance(run_id, str)
         self.mock_task_results[TaskInstanceKey(dag_id, task_id, run_id, try_number)] = State.FAILED
+
+    def __enter__(self):
+        # TODO: Is there a better way to do this?
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # TODO: Is there a better way to do this?
+        pass
