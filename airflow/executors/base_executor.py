@@ -120,7 +120,7 @@ class BaseExecutor(LoggingMixin):
     serve_logs: bool = False
 
     job_id: None | int | str = None
-    name: None | ExecutorName = None
+    name: ExecutorName
     callback_sink: BaseCallbackSink | None = None
 
     def __init__(self, parallelism: int = PARALLELISM):

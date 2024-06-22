@@ -1903,10 +1903,6 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         # First get a mapping of executor names to slots they have available
         executor_to_slots_available: dict[ExecutorName, int] = {}
         for executor in self.job.executors:
-            if TYPE_CHECKING:
-                # All executors should have a name if they are initted from the executor_loader. But we need
-                # to check for None to make mypy happy.
-                assert executor.name
             executor_to_slots_available[executor.name] = executor.slots_available
 
         # Loop through all the TIs we're scheduling for and add them to a set to be moved to queued if the
@@ -1914,10 +1910,6 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         tis_we_have_room_for = set()
         for ti in tis:
             if executor_obj := self._try_to_load_executor(ti.executor):
-                if TYPE_CHECKING:
-                    # All executors should have a name if they are initted from the executor_loader. But we
-                    # need to check for None to make mypy happy.
-                    assert executor_obj.name
                 if executor_to_slots_available[executor_obj.name] > 0:
                     tis_we_have_room_for.add(ti)
                     executor_to_slots_available[executor_obj.name] -= 1
