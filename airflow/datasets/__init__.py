@@ -24,8 +24,11 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterable, Iterator
 
 import attr
 
+from airflow.triggers.base import BaseTrigger
+
 if TYPE_CHECKING:
     from urllib.parse import SplitResult
+    from airflow.models.dataset import DatasetModel
 
 
 from airflow.configuration import conf
@@ -168,6 +171,7 @@ class Dataset(os.PathLike, BaseDataset):
         validator=[attr.validators.min_len(1), attr.validators.max_len(3000)],
     )
     extra: dict[str, Any] | None = None
+    triggers: list[BaseTrigger] | None = None
 
     __version__: ClassVar[int] = 1
 
@@ -181,6 +185,10 @@ class Dataset(os.PathLike, BaseDataset):
 
     def __hash__(self) -> int:
         return hash(self.uri)
+
+    @classmethod
+    def from_model(cls, obj: DatasetModel) -> Dataset:
+        return cls(uri=obj.uri, extra=obj.extra)
 
     def as_expression(self) -> Any:
         """

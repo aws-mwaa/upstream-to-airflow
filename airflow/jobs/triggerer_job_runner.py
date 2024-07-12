@@ -363,7 +363,7 @@ class TriggererJobRunner(BaseJobRunner, LoggingMixin):
                 self.log.error("Trigger runner thread has died! Exiting.")
                 break
             # Clean out unused triggers
-            Trigger.clean_unused()
+            # Trigger.clean_unused()
             # Load/delete triggers
             self.load_triggers()
             # Handle events
@@ -497,11 +497,10 @@ class TriggerRunner(threading.Thread, LoggingMixin):
         while self.to_create:
             trigger_id, trigger_instance = self.to_create.popleft()
             if trigger_id not in self.triggers:
-                ti: TaskInstance = trigger_instance.task_instance
+                # ti: TaskInstance = trigger_instance.task_instance
                 self.triggers[trigger_id] = {
                     "task": asyncio.create_task(self.run_trigger(trigger_id, trigger_instance)),
-                    "name": f"{ti.dag_id}/{ti.run_id}/{ti.task_id}/{ti.map_index}/{ti.try_number} "
-                    f"(ID {trigger_id})",
+                    "name": f"ID {trigger_id}",
                     "events": 0,
                 }
             else:
@@ -603,7 +602,7 @@ class TriggerRunner(threading.Thread, LoggingMixin):
         name = self.triggers[trigger_id]["name"]
         self.log.info("trigger %s starting", name)
         try:
-            self.set_individual_trigger_logging(trigger)
+            # self.set_individual_trigger_logging(trigger)
             async for event in trigger.run():
                 self.log.info("Trigger %s fired: %s", self.triggers[trigger_id]["name"], event)
                 self.triggers[trigger_id]["events"] += 1
@@ -682,15 +681,15 @@ class TriggerRunner(threading.Thread, LoggingMixin):
             # row was updated by either Trigger.submit_event or Trigger.submit_failure
             # and can happen when a single trigger Job is being run on multiple TriggerRunners
             # in a High-Availability setup.
-            if new_trigger_orm.task_instance is None:
-                self.log.info(
-                    (
-                        "TaskInstance for Trigger ID %s is None. It was likely updated by another trigger job. "
-                        "Skipping trigger instantiation."
-                    ),
-                    new_id,
-                )
-                continue
+            # if new_trigger_orm.task_instance is None:
+            #     self.log.info(
+            #         (
+            #             "TaskInstance for Trigger ID %s is None. It was likely updated by another trigger job. "
+            #             "Skipping trigger instantiation."
+            #         ),
+            #         new_id,
+            #     )
+            #     continue
 
             try:
                 new_trigger_instance = trigger_class(**new_trigger_orm.kwargs)

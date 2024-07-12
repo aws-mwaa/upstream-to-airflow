@@ -69,6 +69,7 @@ class DatasetModel(Base):
 
     consuming_dags = relationship("DagScheduleDatasetReference", back_populates="dataset")
     producing_tasks = relationship("TaskOutletDatasetReference", back_populates="dataset")
+    triggers = relationship("TriggerDatasetReference", back_populates="dataset")
 
     __tablename__ = "dataset"
     __table_args__ = (
@@ -144,6 +145,46 @@ class DagScheduleDatasetReference(Base):
     def __eq__(self, other):
         if isinstance(other, self.__class__):
             return self.dataset_id == other.dataset_id and self.dag_id == other.dag_id
+        else:
+            return NotImplemented
+
+    def __hash__(self):
+        return hash(self.__mapper__.primary_key)
+
+    def __repr__(self):
+        args = []
+        for attr in [x.name for x in self.__mapper__.primary_key]:
+            args.append(f"{attr}={getattr(self, attr)!r}")
+        return f"{self.__class__.__name__}({', '.join(args)})"
+
+
+class TriggerDatasetReference(Base):
+    """References from a trigger to a dataset of which it is sending updates."""
+
+    trigger_id = Column(Integer, primary_key=True, nullable=False)
+    dataset_id = Column(Integer, primary_key=True, nullable=False)
+
+    trigger = relationship("Trigger", back_populates="datasets")
+    dataset = relationship("DatasetModel", back_populates="triggers")
+
+    __tablename__ = "trigger_dataset_reference"
+    __table_args__ = (
+        PrimaryKeyConstraint(trigger_id, dataset_id),
+        ForeignKeyConstraint(
+            columns=(trigger_id,),
+            refcolumns=["trigger.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            (dataset_id,),
+            ["dataset.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.trigger_id == other.trigger_id and self.dataset_id == other.dataset_id
         else:
             return NotImplemented
 

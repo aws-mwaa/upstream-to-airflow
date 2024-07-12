@@ -103,7 +103,7 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.models.dagcode import DagCode
 from airflow.models.dagpickle import DagPickle
 from airflow.models.dagrun import RUN_ID_REGEX, DagRun
-from airflow.models.dataset import DatasetDagRunQueue, DatasetModel
+from airflow.models.dataset import DatasetDagRunQueue, DatasetModel, TriggerDatasetReference
 from airflow.models.param import DagParam, ParamsDict
 from airflow.models.taskinstance import (
     Context,
@@ -3295,6 +3295,7 @@ class DAG(LoggingMixin):
 
         dag_references = defaultdict(set)
         outlet_references = defaultdict(set)
+        dataset_references = defaultdict(set)
         # We can't use a set here as we want to preserve order
         outlet_datasets: dict[DatasetModel, None] = {}
         input_datasets: dict[DatasetModel, None] = {}
@@ -3312,6 +3313,11 @@ class DAG(LoggingMixin):
                 for _, dataset in dataset_condition.iter_datasets():
                     dag_references[dag.dag_id].add(dataset.uri)
                     input_datasets[DatasetModel.from_public(dataset)] = None
+                    if dataset.triggers:
+                        # Dataset has some triggers
+                        for trigger in dataset.triggers:
+                            dataset_references[dataset.uri].add(trigger)
+
             curr_outlet_references = curr_orm_dag and curr_orm_dag.task_outlet_dataset_references
             for task in dag.tasks:
                 dataset_outlets = [x for x in task.outlets or [] if isinstance(x, Dataset)]
@@ -3350,6 +3356,41 @@ class DAG(LoggingMixin):
 
         del new_datasets
         del all_datasets
+
+        dataset_trigger_references = set()
+        for dataset_uri, triggers in dataset_references.items():
+            # Create triggers associated to datasets
+            from airflow.models.trigger import Trigger
+
+            for trigger in triggers:
+                trigger_row = Trigger.from_object(trigger)
+                # TODO: check kwargs as well
+                stored_trigger = session.scalar(
+                    select(Trigger).where(Trigger.classpath == trigger_row.classpath).limit(1)
+                )
+                if not stored_trigger:
+                    session.add(trigger_row)
+                    session.flush()
+                    trigger_id = trigger_row.id
+                else:
+                    trigger_id = stored_trigger.id
+
+                stored_dataset_trigger_ref = session.scalar(
+                    select(TriggerDatasetReference)
+                    .where(
+                        TriggerDatasetReference.trigger_id == trigger_id,
+                        TriggerDatasetReference.dataset_id == stored_datasets[dataset_uri].id,
+                    )
+                    .limit(1)
+                )
+
+                if not stored_dataset_trigger_ref:
+                    dataset_trigger_references.add(
+                        TriggerDatasetReference(
+                            trigger_id=trigger_id, dataset_id=stored_datasets[dataset_uri].id
+                        )
+                    )
+        session.bulk_save_objects(dataset_trigger_references)
 
         # reconcile dag-schedule-on-dataset references
         for dag_id, uri_list in dag_references.items():

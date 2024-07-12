@@ -24,8 +24,11 @@ from sqlalchemy import Column, Integer, String, Text, delete, func, or_, select,
 from sqlalchemy.orm import joinedload, relationship
 from sqlalchemy.sql.functions import coalesce
 
+from airflow import Dataset
 from airflow.api_internal.internal_api_call import internal_api_call
+from airflow.datasets.manager import DatasetManager
 from airflow.models.base import Base
+from airflow.models.dataset import TriggerDatasetReference, DatasetModel
 from airflow.models.taskinstance import TaskInstance
 from airflow.utils import timezone
 from airflow.utils.retries import run_with_db_retries
@@ -75,6 +78,8 @@ class Trigger(Base):
     )
 
     task_instance = relationship("TaskInstance", back_populates="trigger", lazy="joined", uselist=False)
+
+    datasets = relationship("TriggerDatasetReference", back_populates="trigger")
 
     def __init__(
         self,
@@ -212,6 +217,19 @@ class Trigger(Base):
             # Finally, mark it as scheduled so it gets re-queued
             task_instance.state = TaskInstanceState.SCHEDULED
 
+        dataset_references = session.scalars(select(TriggerDatasetReference).where(
+            TriggerDatasetReference.trigger_id == trigger_id
+        ))
+        dataset_ids = {dataset_reference.dataset_id for dataset_reference in dataset_references}
+        datasets = session.scalars(select(DatasetModel).where(
+            DatasetModel.id.in_(dataset_ids)
+        ))
+        for dataset in datasets:
+            DatasetManager.register_dataset_change(
+                dataset=Dataset.from_model(dataset),
+                session=session,
+            )
+
     @classmethod
     @internal_api_call
     @provide_session
@@ -312,4 +330,15 @@ class Trigger(Base):
             session,
             skip_locked=True,
         )
-        return session.execute(query).all()
+        ti_triggers = set(session.execute(query).all())
+
+        query = with_row_locks(
+            select(cls.id)
+            .join(TriggerDatasetReference, cls.id == TriggerDatasetReference.trigger_id, isouter=False)
+            .limit(capacity),
+            session,
+            skip_locked=True,
+        )
+        dataset_triggers = set(session.execute(query).all())
+
+        return ti_triggers.union(dataset_triggers)
