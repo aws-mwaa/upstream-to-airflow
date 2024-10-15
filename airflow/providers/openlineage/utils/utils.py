@@ -257,8 +257,31 @@ class DagInfo(InfoJsonEncodable):
         "start_date",
         "tags",
     ]
-    casts = {"timetable": lambda dag: dag.timetable.serialize() if getattr(dag, "timetable", None) else None}
+    casts = {"timetable": lambda dag: DagInfo.serialize_timetable(dag)}
     renames = {"_dag_id": "dag_id"}
+
+    @classmethod
+    def serialize_timetable(cls, dag):
+        serialized = dag.timetable.serialize()
+        if serialized != {} and serialized is not None:
+            return serialized
+        try:
+            from airflow.serialization.serialized_objects import encode_dataset_condition
+
+            return {"dataset_condition": encode_dataset_condition(dag.timetable.dataset_condition)}
+        except ImportError:
+            if hasattr(dag, "dataset_triggers"):
+                triggers = dag.dataset_triggers
+                return {
+                    "dataset_condition": {
+                        "__type": "dataset_all",
+                        "objects": [
+                            {"__type": "dataset", "uri": trigger.uri, "extra": trigger.extra}
+                            for trigger in triggers
+                        ],
+                    }
+                }
+        return {}
 
 
 class DagRunInfo(InfoJsonEncodable):
@@ -445,7 +468,20 @@ def get_airflow_job_facet(dag_run: DagRun) -> dict[str, AirflowJobFacet]:
 def get_airflow_state_run_facet(
     dag_id: str, run_id: str, task_ids: list[str], dag_run_state: DagRunState
 ) -> dict[str, AirflowStateRunFacet]:
-    tis = DagRun.fetch_task_instances(dag_id=dag_id, run_id=run_id, task_ids=task_ids)
+    try:
+        tis = DagRun.fetch_task_instances(dag_id=dag_id, run_id=run_id, task_ids=task_ids)
+    except AttributeError:
+        try:
+            dr = DagRun(dag_id=dag_id, run_id=run_id)
+            tis = dr.get_task_instances()
+        except:  # noqa: E722
+            log.debug(
+                "Failed to fetch task instances for %s %s %s - Airflow version too old.",
+                dag_id,
+                run_id,
+                task_ids,
+            )
+            return {}
     return {
         "airflowState": AirflowStateRunFacet(
             dagRunState=dag_run_state,
@@ -609,10 +645,11 @@ def print_warning(log):
             try:
                 return f(*args, **kwargs)
             except Exception as e:
+                print("?")
                 log.warning(
-                    "Note: exception below is being caught: it's printed for visibility. However OpenLineage events aren't being emitted. If you see that, task has completed successfully despite not getting OL events."
+                    "Note: exception below is being caught: it's printed for visibility. However OpenLineage events aren't being emitted. If you see that, task has completed successfully despite not getting OL events.",
+                    exc_info=e,
                 )
-                log.warning(e)
 
         return wrapper
 

@@ -191,6 +191,8 @@ class ExtractorManager(LoggingMixin):
         except ImportError:
             return None
 
+        if not hasattr(get_hook_lineage_collector(), "has_collected"):
+            return None
         if not get_hook_lineage_collector().has_collected:
             return None
 

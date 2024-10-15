@@ -162,6 +162,7 @@ def should_skip_the_package(provider_id: str, version_suffix: str) -> tuple[bool
     and skip the released if it was. This allows to skip packages that have not been
     marked for release in this wave. For "dev" suffixes, we always build all packages.
     """
+    return False, version_suffix
     if version_suffix != "" and not version_suffix.startswith("rc"):
         return False, version_suffix
     if version_suffix == "":
