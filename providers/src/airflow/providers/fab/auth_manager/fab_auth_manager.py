@@ -192,7 +192,8 @@ class FabAuthManager(BaseAuthManager):
 
     def init(self) -> None:
         """Run operations when Airflow is initializing."""
-        self._sync_appbuilder_roles()
+        if self.appbuilder:
+            self._sync_appbuilder_roles()
 
     def is_logged_in(self) -> bool:
         """Return whether the user is logged in."""
@@ -200,7 +201,7 @@ class FabAuthManager(BaseAuthManager):
         if Version(Version(version).base_version) < Version("3.0.0"):
             return not user.is_anonymous and user.is_active
         else:
-            return self.appbuilder.get_app.config.get("AUTH_ROLE_PUBLIC", None) or (
+            return (self.appbuilder and self.appbuilder.get_app.config.get("AUTH_ROLE_PUBLIC", None)) or (
                 not user.is_anonymous and user.is_active
             )
 
@@ -353,6 +354,9 @@ class FabAuthManager(BaseAuthManager):
     @cached_property
     def security_manager(self) -> FabAirflowSecurityManagerOverride:
         """Return the security manager specific to FAB."""
+        if not self.appbuilder:
+            raise AirflowException("AppBuilder is not initialized.")
+
         from airflow.providers.fab.auth_manager.security_manager.override import (
             FabAirflowSecurityManagerOverride,
         )
@@ -411,6 +415,8 @@ class FabAuthManager(BaseAuthManager):
         """
         if not user:
             user = self.get_user()
+        if not user:
+            return False
 
         fab_action = self._get_fab_action(method)
         user_permissions = self._get_user_permissions(user)
@@ -528,6 +534,9 @@ class FabAuthManager(BaseAuthManager):
 
         :meta private:
         """
+        if not self.appbuilder:
+            raise AirflowException("AppBuilder is not initialized.")
+
         if "." in dag_id and hasattr(DagModel, "root_dag_id"):
             return self.appbuilder.get_session.scalar(
                 select(DagModel.dag_id, DagModel.root_dag_id).where(DagModel.dag_id == dag_id).limit(1)

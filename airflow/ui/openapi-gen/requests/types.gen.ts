@@ -334,6 +334,7 @@ export type HistoricalMetricsResponse = HistoricalMetricDataResponse;
 
 export type GetDagsData = {
   dagDisplayNamePattern?: string | null;
+  dagId?: string | null;
   dagIdPattern?: string | null;
   lastDagRunState?: DagRunState | null;
   limit?: number;
@@ -363,13 +364,13 @@ export type PatchDagsData = {
 export type PatchDagsResponse = DAGCollectionResponse;
 
 export type GetDagData = {
-  dagId: string;
+  dagId: string | null;
 };
 
 export type GetDagResponse = DAGResponse;
 
 export type PatchDagData = {
-  dagId: string;
+  dagId: string | null;
   requestBody: DAGPatchBody;
   updateMask?: Array<string> | null;
 };
@@ -377,13 +378,13 @@ export type PatchDagData = {
 export type PatchDagResponse = DAGResponse;
 
 export type DeleteDagData = {
-  dagId: string;
+  dagId: string | null;
 };
 
 export type DeleteDagResponse = unknown;
 
 export type GetDagDetailsData = {
-  dagId: string;
+  dagId: string | null;
 };
 
 export type GetDagDetailsResponse = DAGDetailsResponse;

@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import logging
 import os
+from importlib import import_module
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 
 from fastapi import FastAPI
@@ -27,10 +29,16 @@ from starlette.responses import HTMLResponse
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
+from airflow.auth.managers.base_auth_manager import BaseAuthManager
+from airflow.configuration import conf
+from airflow.exceptions import AirflowConfigException, AirflowException
 from airflow.settings import AIRFLOW_PATH
 from airflow.www.extensions.init_dagbag import get_dag_bag
 
 log = logging.getLogger(__name__)
+
+auth_manager: BaseAuthManager | None = None
+auth_backends: list[ModuleType] | None = None
 
 
 def init_dag_bag(app: FastAPI) -> None:
@@ -94,3 +102,65 @@ def init_plugins(app: FastAPI) -> None:
 
         log.debug("Adding subapplication %s under prefix %s", name, url_prefix)
         app.mount(url_prefix, subapp)
+
+
+def get_auth_manager_cls() -> type[BaseAuthManager]:
+    """
+    Return just the auth manager class without initializing it.
+
+    Useful to save execution time if only static methods need to be called.
+    """
+    auth_manager_cls = conf.getimport(section="core", key="auth_manager")
+
+    if not auth_manager_cls:
+        raise AirflowConfigException(
+            "No auth manager defined in the config. "
+            "Please specify one using section/key [core/auth_manager]."
+        )
+
+    return auth_manager_cls
+
+
+def init_auth_manager() -> BaseAuthManager:
+    """
+    Initialize the auth manager.
+
+    Import the user manager class and instantiate it.
+    """
+    global auth_manager
+    auth_manager_cls = get_auth_manager_cls()
+    auth_manager = auth_manager_cls()
+    auth_manager.init()
+    return auth_manager
+
+
+def get_auth_manager() -> BaseAuthManager:
+    """Return the auth manager, provided it's been initialized before."""
+    if auth_manager is None:
+        return init_auth_manager()
+    return auth_manager
+
+
+def init_auth_backends():
+    """Load authentication backends."""
+    global auth_backends
+    auth_backends_str = conf.get("api", "auth_backends")
+
+    auth_backends = []
+    for auth_backend in auth_backends_str.split(","):
+        try:
+            auth_module = import_module(auth_backend.strip())
+            auth_backends.append(auth_module)
+        except ImportError as err:
+            log.critical("Cannot import %s as auth backend due to: %s", auth_backend, err)
+            raise AirflowException(err)
+
+
+def get_auth_backends() -> list[ModuleType]:
+    """Return the list of auth backends configured in the environment."""
+    if auth_backends is None:
+        raise RuntimeError(
+            "Auth backends have not been initialized yet. "
+            "The `init_auth_backends` method needs to be called first."
+        )
+    return auth_backends

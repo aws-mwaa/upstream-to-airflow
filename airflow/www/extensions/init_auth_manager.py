@@ -45,7 +45,7 @@ def get_auth_manager_cls() -> type[BaseAuthManager]:
     return auth_manager_cls
 
 
-def init_auth_manager(appbuilder: AirflowAppBuilder) -> BaseAuthManager:
+def init_auth_manager(appbuilder: AirflowAppBuilder | None = None) -> BaseAuthManager:
     """
     Initialize the auth manager.
 
@@ -61,10 +61,7 @@ def init_auth_manager(appbuilder: AirflowAppBuilder) -> BaseAuthManager:
 def get_auth_manager() -> BaseAuthManager:
     """Return the auth manager, provided it's been initialized before."""
     if auth_manager is None:
-        raise RuntimeError(
-            "Auth Manager has not been initialized yet. "
-            "The `init_auth_manager` method needs to be called first."
-        )
+        return init_auth_manager()
     return auth_manager
 
 

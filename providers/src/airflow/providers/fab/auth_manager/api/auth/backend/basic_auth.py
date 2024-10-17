@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, TypeVar, cast
 
 from flask import Response, current_app, request
 from flask_appbuilder.const import AUTH_LDAP
@@ -30,8 +30,6 @@ from airflow.www.extensions.init_auth_manager import get_auth_manager
 
 if TYPE_CHECKING:
     from airflow.providers.fab.auth_manager.models import User
-
-CLIENT_AUTH: tuple[str, str] | Any | None = None
 
 T = TypeVar("T", bound=Callable)
 

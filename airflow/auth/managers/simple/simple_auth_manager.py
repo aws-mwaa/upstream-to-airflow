@@ -89,6 +89,8 @@ class SimpleAuthManager(BaseAuthManager):
         )
 
     def init(self) -> None:
+        if not self.appbuilder:
+            return
         user_passwords_from_file = {}
 
         # Read passwords from file
@@ -115,8 +117,9 @@ class SimpleAuthManager(BaseAuthManager):
             file.write(json.dumps(self.passwords))
 
     def is_logged_in(self) -> bool:
-        return "user" in session or self.appbuilder.get_app.config.get(
-            "SIMPLE_AUTH_MANAGER_ALL_ADMINS", False
+        return "user" in session or (
+            self.appbuilder is not None
+            and self.appbuilder.get_app.config.get("SIMPLE_AUTH_MANAGER_ALL_ADMINS", False)
         )
 
     def get_url_login(self, **kwargs) -> str:
@@ -128,7 +131,7 @@ class SimpleAuthManager(BaseAuthManager):
     def get_user(self) -> SimpleAuthManagerUser | None:
         if not self.is_logged_in():
             return None
-        if self.appbuilder.get_app.config.get("SIMPLE_AUTH_MANAGER_ALL_ADMINS", False):
+        if self.appbuilder and self.appbuilder.get_app.config.get("SIMPLE_AUTH_MANAGER_ALL_ADMINS", False):
             return SimpleAuthManagerUser(username="anonymous", role="admin")
         else:
             return session["user"]
@@ -197,6 +200,8 @@ class SimpleAuthManager(BaseAuthManager):
         return self._is_authorized(method="GET", allow_role=SimpleAuthManagerRole.VIEWER)
 
     def register_views(self) -> None:
+        if not self.appbuilder:
+            return
         self.appbuilder.add_view_no_menu(
             SimpleAuthManagerAuthenticationViews(
                 users=self.appbuilder.get_app.config.get("SIMPLE_AUTH_MANAGER_USERS", []),

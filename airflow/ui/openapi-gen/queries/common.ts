@@ -61,6 +61,7 @@ export const useDagServiceGetDagsKey = "DagServiceGetDags";
 export const UseDagServiceGetDagsKeyFn = (
   {
     dagDisplayNamePattern,
+    dagId,
     dagIdPattern,
     lastDagRunState,
     limit,
@@ -72,6 +73,7 @@ export const UseDagServiceGetDagsKeyFn = (
     tags,
   }: {
     dagDisplayNamePattern?: string;
+    dagId?: string;
     dagIdPattern?: string;
     lastDagRunState?: DagRunState;
     limit?: number;
@@ -88,6 +90,7 @@ export const UseDagServiceGetDagsKeyFn = (
   ...(queryKey ?? [
     {
       dagDisplayNamePattern,
+      dagId,
       dagIdPattern,
       lastDagRunState,
       limit,

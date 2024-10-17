@@ -21,7 +21,12 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from airflow.api_fastapi.core_api.app import init_dag_bag, init_plugins, init_views
+from airflow.api_fastapi.core_api.app import (
+    init_auth_backends,
+    init_dag_bag,
+    init_plugins,
+    init_views,
+)
 from airflow.api_fastapi.execution_api.app import create_task_execution_api_app
 
 log = logging.getLogger(__name__)
@@ -45,6 +50,7 @@ def create_app(apps: str = "all") -> FastAPI:
         init_dag_bag(app)
         init_views(app)
         init_plugins(app)
+        init_auth_backends()
 
     if "execution" in apps_list or "all" in apps_list:
         task_exec_api_app = create_task_execution_api_app(app)

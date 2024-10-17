@@ -69,7 +69,7 @@ class BaseAuthManager(LoggingMixin):
     :param appbuilder: the flask app builder
     """
 
-    def __init__(self, appbuilder: AirflowAppBuilder) -> None:
+    def __init__(self, appbuilder: AirflowAppBuilder | None = None) -> None:
         super().__init__()
         self.appbuilder = appbuilder
 

@@ -62,6 +62,7 @@ export const prefetchUseDashboardServiceHistoricalMetrics = (
  * Get Dags
  * Get all DAGs.
  * @param data The data for the request.
+ * @param data.dagId
  * @param data.limit
  * @param data.offset
  * @param data.tags
@@ -79,6 +80,7 @@ export const prefetchUseDagServiceGetDags = (
   queryClient: QueryClient,
   {
     dagDisplayNamePattern,
+    dagId,
     dagIdPattern,
     lastDagRunState,
     limit,
@@ -90,6 +92,7 @@ export const prefetchUseDagServiceGetDags = (
     tags,
   }: {
     dagDisplayNamePattern?: string;
+    dagId?: string;
     dagIdPattern?: string;
     lastDagRunState?: DagRunState;
     limit?: number;
@@ -104,6 +107,7 @@ export const prefetchUseDagServiceGetDags = (
   queryClient.prefetchQuery({
     queryKey: Common.UseDagServiceGetDagsKeyFn({
       dagDisplayNamePattern,
+      dagId,
       dagIdPattern,
       lastDagRunState,
       limit,
@@ -117,6 +121,7 @@ export const prefetchUseDagServiceGetDags = (
     queryFn: () =>
       DagService.getDags({
         dagDisplayNamePattern,
+        dagId,
         dagIdPattern,
         lastDagRunState,
         limit,

@@ -20,16 +20,9 @@
 from __future__ import annotations
 
 from functools import wraps
-from typing import Any, Callable, TypeVar, cast
+from typing import Callable, TypeVar, cast
 
 from flask import Response
-
-CLIENT_AUTH: tuple[str, str] | Any | None = None
-
-
-def init_app(_):
-    """Initialize authentication."""
-
 
 T = TypeVar("T", bound=Callable)
 

@@ -75,6 +75,7 @@ export const useDashboardServiceHistoricalMetricsSuspense = <
  * Get Dags
  * Get all DAGs.
  * @param data The data for the request.
+ * @param data.dagId
  * @param data.limit
  * @param data.offset
  * @param data.tags
@@ -95,6 +96,7 @@ export const useDagServiceGetDagsSuspense = <
 >(
   {
     dagDisplayNamePattern,
+    dagId,
     dagIdPattern,
     lastDagRunState,
     limit,
@@ -106,6 +108,7 @@ export const useDagServiceGetDagsSuspense = <
     tags,
   }: {
     dagDisplayNamePattern?: string;
+    dagId?: string;
     dagIdPattern?: string;
     lastDagRunState?: DagRunState;
     limit?: number;
@@ -123,6 +126,7 @@ export const useDagServiceGetDagsSuspense = <
     queryKey: Common.UseDagServiceGetDagsKeyFn(
       {
         dagDisplayNamePattern,
+        dagId,
         dagIdPattern,
         lastDagRunState,
         limit,
@@ -138,6 +142,7 @@ export const useDagServiceGetDagsSuspense = <
     queryFn: () =>
       DagService.getDags({
         dagDisplayNamePattern,
+        dagId,
         dagIdPattern,
         lastDagRunState,
         limit,

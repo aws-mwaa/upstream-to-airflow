@@ -19,13 +19,9 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
 
 import airflow.providers.fab.auth_manager.api.auth.backend.session as fab_session
 from airflow.exceptions import RemovedInAirflow3Warning
-
-CLIENT_AUTH: tuple[str, str] | Any | None = None
-
 
 warnings.warn(
     "This module is deprecated. Please use `airflow.providers.fab.auth_manager.api.auth.backend.session` instead.",
@@ -34,5 +30,4 @@ warnings.warn(
 )
 
 
-init_app = fab_session.init_app
 requires_authentication = fab_session.requires_authentication
