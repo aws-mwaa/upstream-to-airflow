@@ -463,6 +463,10 @@ fixture-parentheses = false
 [tool.pytest.ini_options]
 addopts = [
     "--tb=short",
+    # The stdin/out redirecting tests in TaskSDK don't work with the default
+    # capture=fd, so swap it to sys. There's no easy way I've found ot set this
+    # setting early enough for with our workspaces folder
+    "--capture=sys",
     "-rasl",
     "--verbosity=2",
     # Disable `flaky` plugin for pytest. This plugin conflicts with `rerunfailures` because provide the same marker.

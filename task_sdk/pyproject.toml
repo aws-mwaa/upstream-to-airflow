@@ -25,6 +25,9 @@ dependencies = [
     "attrs>=24.2.0",
     "google-re2>=1.1.20240702",
     "methodtools>=0.4.7",
+    "msgspec>=0.18.6",
+    "psutil>=6.1.0",
+    "structlog>=24.4.0",
 ]
 
 [build-system]
@@ -44,7 +47,13 @@ namespace-packages = ["src/airflow"]
 # Ignore Doc rules et al for anything outside of tests
 "!src/*" = ["D", "TID253", "S101", "TRY002"]
 
+
 "src/airflow/sdk/__init__.py" = ["TCH004"]
+# This is not part of the public API, so disable some of the doc requirements
+"src/airflow/sdk/execution_time/*" = ["D101"]
+
+# Generated file, be less strict
+"src/airflow/sdk/*/_generated.py" = ["D"]
 
 [tool.uv]
 dev-dependencies = [
@@ -53,6 +62,10 @@ dev-dependencies = [
     "pytest-mock>=3.14.0",
     "pytest>=8.3.3",
 ]
+
+[tool.uv.sources]
+# Need a version with https://github.com/koxudaxi/datamodel-code-generator/pull/2124 in it, not yet released
+datamodel-code-generator = { git = "https://github.com/koxudaxi/datamodel-code-generator.git", rev = "cb0462ae84700865a42df45a0e91a1693c199891" }
 
 [tool.coverage.run]
 branch = true
@@ -71,3 +84,33 @@ exclude_also = [
     "@(typing(_extensions)?\\.)?overload",
     "if (typing(_extensions)?\\.)?TYPE_CHECKING:",
 ]
+
+[dependency-groups]
+codegen = [
+    "datamodel-code-generator[http]",
+]
+
+[tool.black]
+# This is needed for datamodel-codegen to treat this as the "project" file
+
+# To use:
+#
+#   uv run --group codegen --project apache-airflow-task-sdk --directory task_sdk datamodel-codegen
+[tool.datamodel-codegen]
+capitalise-enum-members=true # `State.RUNNING` not `State.running`
+disable-timestamp=true
+enable-version-header=true
+enum-field-as-literal='one' # When a single enum member, make it output a `Literal["..."]`
+input-file-type='openapi'
+output-model-type='msgspec.Struct'
+output-datetime-class='datetime'
+target-python-version='3.9'
+use-default=true
+use-double-quotes=true
+use-schema-description=true  # Desc becomes class doc comment
+use-standard-collections=true # list[] not List[]
+use-subclass-enum=true # enum, not union of Literals
+use-union-operator=true # 3.9+annotations, not `Union[]`
+
+url = 'http://0.0.0.0:9091/execution/openapi.json'
+output = 'src/airflow/sdk/api/datamodels/_generated.py'
