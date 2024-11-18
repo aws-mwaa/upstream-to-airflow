@@ -24,7 +24,6 @@ import enum
 import inspect
 import logging
 import weakref
-from functools import cache
 from inspect import signature
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any, Collection, Iterable, Mapping, NamedTuple, Union, cast
@@ -44,6 +43,7 @@ from airflow.assets import (
     _AssetAliasCondition,
 )
 from airflow.callbacks.callback_requests import DagCallbackRequest, TaskCallbackRequest
+from airflow.compat.functools import cache
 from airflow.exceptions import AirflowException, SerializationError, TaskDeferred
 from airflow.jobs.job import Job
 from airflow.models import Trigger

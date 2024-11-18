@@ -24,11 +24,10 @@ import signal
 import sys
 import time
 from abc import abstractmethod
-from collections.abc import Generator
 from dataclasses import dataclass
 from multiprocessing.pool import Pool
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Generator
 
 import yaml
 

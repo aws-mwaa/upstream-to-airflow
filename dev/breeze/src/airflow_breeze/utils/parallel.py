@@ -23,14 +23,13 @@ import sys
 import textwrap
 import time
 from abc import ABCMeta, abstractmethod
-from collections.abc import Generator
 from contextlib import contextmanager
 from enum import Enum
 from multiprocessing.pool import ApplyResult, Pool
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import Thread
-from typing import Any, NamedTuple
+from typing import Any, Generator, NamedTuple
 
 from rich.table import Table
 

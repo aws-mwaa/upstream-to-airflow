@@ -24,7 +24,8 @@ import os
 import pkgutil
 import platform
 import sys
-from functools import cache
+
+from airflow.compat.functools import cache
 
 IS_WINDOWS = platform.system() == "Windows"
 

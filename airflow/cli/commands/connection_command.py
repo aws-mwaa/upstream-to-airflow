@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import os
 import warnings
-from functools import cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -31,6 +30,7 @@ from sqlalchemy.orm import exc
 
 from airflow.cli.simple_table import AirflowConsole
 from airflow.cli.utils import is_stdout, print_export_output
+from airflow.compat.functools import cache
 from airflow.configuration import conf
 from airflow.exceptions import AirflowNotFoundException
 from airflow.hooks.base import BaseHook

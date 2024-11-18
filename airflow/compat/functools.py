@@ -1,3 +1,4 @@
+#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -16,23 +17,17 @@
 # under the License.
 from __future__ import annotations
 
-import os
-from functools import lru_cache
+import sys
 
-from black import Mode, TargetVersion, format_str, parse_pyproject_toml
+if sys.version_info >= (3, 9):
+    from functools import cache
+else:
+    from functools import lru_cache
 
-from airflow_breeze.utils.path_utils import AIRFLOW_SOURCES_ROOT
+    cache = lru_cache(maxsize=None)
 
+# We need to keep it around, in case it was used in the code of old providers, but since we are
+# Python 3.8+ we can directly import the functools one
+from functools import cached_property  # type: ignore
 
-@lru_cache(maxsize=None)
-def _black_mode() -> Mode:
-    config = parse_pyproject_toml(os.path.join(AIRFLOW_SOURCES_ROOT, "pyproject.toml"))
-    target_versions = {TargetVersion[val.upper()] for val in config.get("target_version", ())}
-    return Mode(
-        target_versions=target_versions,
-        line_length=config.get("line_length", Mode.line_length),
-    )
-
-
-def black_format(content) -> str:
-    return format_str(content, mode=_black_mode())
+__all__ = ["cache", "cached_property"]

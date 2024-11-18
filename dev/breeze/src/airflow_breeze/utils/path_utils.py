@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from functools import cache
+from functools import lru_cache
 from pathlib import Path
 
 from airflow_breeze import NAME
@@ -221,7 +221,7 @@ def get_used_airflow_sources() -> Path:
     return current_sources
 
 
-@cache
+@lru_cache(maxsize=None)
 def find_airflow_sources_root_to_operate_on() -> Path:
     """
     Find the root of airflow sources we operate on. Handle the case when Breeze is installed via `pipx` from

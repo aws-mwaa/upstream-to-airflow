@@ -18,9 +18,8 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 import click
 from click import Context, Parameter, ParamType

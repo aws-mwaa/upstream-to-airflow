@@ -223,9 +223,12 @@ class SqlToS3Operator(BaseOperator):
         for group_label in (grouped_df := df.groupby(**self.groupby_kwargs)).groups:
             yield (
                 cast(str, group_label),
-                grouped_df.get_group(group_label)
-                .drop(random_column_name, axis=1, errors="ignore")
-                .reset_index(drop=True),
+                cast(
+                    "pd.DataFrame",
+                    grouped_df.get_group(group_label)
+                    .drop(random_column_name, axis=1, errors="ignore")
+                    .reset_index(drop=True),
+                ),
             )
 
     def _get_hook(self) -> DbApiHook:
