@@ -110,6 +110,7 @@ def _execute_work(log: logging.Logger, workload: workloads.ExecuteTask) -> None:
     setproctitle(f"airflow worker -- LocalExecutor: {workload.ti.id}")
     # This will return the exit code of the task process, but we don't care about that, just if the
     # _supervisor_ had an error reporting the state back (which will result in an exception.)
+    # Banana
     supervise(
         # This is the "wrong" ti type, but it duck types the same. TODO: Create a protocol for this.
         ti=workload.ti,  # type: ignore[arg-type]
