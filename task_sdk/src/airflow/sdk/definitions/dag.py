@@ -51,6 +51,7 @@ from airflow.exceptions import (
     ParamValidationError,
     TaskNotFound,
 )
+from airflow.models.deadline import DeadlineAlert
 from airflow.sdk.definitions._internal.abstractoperator import AbstractOperator
 from airflow.sdk.definitions._internal.types import NOTSET
 from airflow.sdk.definitions.asset import AssetAll, BaseAsset
@@ -105,7 +106,7 @@ _DAG_HASH_ATTRS = frozenset(
         "template_searchpath",
         "last_loaded",
         "schedule",
-        # TODO: Task-SDK: we should be hashing on timetable now, not scheulde!
+        # TODO: Task-SDK: we should be hashing on timetable now, not schedule!
         # "timetable",
     }
 )
@@ -401,6 +402,11 @@ class DAG:
         validator=attrs.validators.optional(attrs.validators.instance_of(timedelta)),
     )
     # sla_miss_callback: None | SLAMissCallback | list[SLAMissCallback] = None
+    deadline: DeadlineAlert | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.instance_of(DeadlineAlert)),
+    )
+
     catchup: bool = attrs.field(default=True, converter=bool)
     on_success_callback: None | DagStateChangeCallback | list[DagStateChangeCallback] = None
     on_failure_callback: None | DagStateChangeCallback | list[DagStateChangeCallback] = None
@@ -1052,6 +1058,7 @@ if TYPE_CHECKING:
         catchup: bool = ...,
         on_success_callback: None | DagStateChangeCallback | list[DagStateChangeCallback] = None,
         on_failure_callback: None | DagStateChangeCallback | list[DagStateChangeCallback] = None,
+        deadline: DeadlineAlert | None = None,
         doc_md: str | None = None,
         params: ParamsDict | dict[str, Any] | None = None,
         access_control: dict[str, dict[str, Collection[str]]] | dict[str, Collection[str]] | None = None,

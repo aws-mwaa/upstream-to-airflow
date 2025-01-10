@@ -381,6 +381,7 @@ class DAG(TaskSDKDag, LoggingMixin):
     :param dagrun_timeout: Specify the duration a DagRun should be allowed to run before it times out or
         fails. Task instances that are running when a DagRun is timed out will be marked as skipped.
     :param sla_miss_callback: DEPRECATED - The SLA feature is removed in Airflow 3.0, to be replaced with a new implementation in 3.1
+    :param deadline: Optional Deadline Alert for the DAG.
     :param default_view: Specify DAG default view (grid, graph, duration,
                                                    gantt, landing_times), default grid
     :param orientation: Specify DAG orientation in graph view (LR, TB, RL, BT), default LR
@@ -2058,7 +2059,7 @@ class DagModel(Base):
 
     __tablename__ = "dag"
     """
-    These items are stored in the database for state related information
+    These items are stored in the database for state related information.
     """
     dag_id = Column(StringID(), primary_key=True)
     # A DAG can be paused from the UI / DB
@@ -2095,6 +2096,8 @@ class DagModel(Base):
     timetable_description = Column(String(1000), nullable=True)
     # Asset expression based on asset triggers
     asset_expression = Column(sqlalchemy_jsonfield.JSONField(json=json), nullable=True)
+    # DAG deadline information
+    deadline = Column(sqlalchemy_jsonfield.JSONField(json=json), nullable=True)
     # Tags for view filter
     tags = relationship("DagTag", cascade="all, delete, delete-orphan", backref=backref("dag"))
     # Dag owner links for DAGs view

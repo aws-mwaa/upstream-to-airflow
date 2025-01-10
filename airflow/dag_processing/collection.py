@@ -17,7 +17,7 @@
 # under the License.
 
 """
-Utility code that write DAGs in bulk into the database.
+Utility code that writes DAGs in bulk into the database.
 
 This should generally only be called by internal methods such as
 ``DagBag._sync_to_db``, ``DAG.bulk_write_to_db``.
@@ -452,6 +452,9 @@ class DagModelOperation(NamedTuple):
                 dm.max_consecutive_failed_dag_runs = conf.getint(
                     "core", "max_consecutive_failed_dag_runs_per_dag"
                 )
+
+            if dag.deadline is not None:
+                dm.deadline = dag.deadline
 
             if hasattr(dag, "has_task_concurrency_limits"):
                 dm.has_task_concurrency_limits = dag.has_task_concurrency_limits
