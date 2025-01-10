@@ -158,6 +158,7 @@ serialized_simple_dag_ground_truth = {
         },
         "is_paused_upon_creation": False,
         "dag_id": "simple_dag",
+        "deadline": None,
         "catchup": False,
         "disable_bundle_versioning": False,
         "doc_md": "### DAG Tutorial Documentation",
@@ -3128,6 +3129,7 @@ def test_handle_v1_serdag():
             },
             "is_paused_upon_creation": False,
             "_dag_id": "simple_dag",
+            "deadline": None,
             "doc_md": "### DAG Tutorial Documentation",
             "fileloc": None,
             "_processor_dags_folder": (
