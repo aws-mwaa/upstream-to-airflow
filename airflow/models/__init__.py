@@ -96,6 +96,7 @@ __lazy_imports = {
     "DagTag": "airflow.models.dag",
     "DagWarning": "airflow.models.dagwarning",
     "DbCallbackRequest": "airflow.models.db_callback_request",
+    "Deadline": "airflow.models.deadline",
     "Log": "airflow.models.log",
     "MappedOperator": "airflow.models.mappedoperator",
     "Operator": "airflow.models.operator",

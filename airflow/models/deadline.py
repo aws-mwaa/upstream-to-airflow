@@ -16,8 +16,9 @@
 # under the License.
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING
+import logging
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Callable
 
 import sqlalchemy_jsonfield
 import uuid6
@@ -31,6 +32,8 @@ from airflow.utils.session import NEW_SESSION, provide_session
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+log = logging.getLogger(__name__)
 
 
 class Deadline(Base, LoggingMixin):
@@ -90,3 +93,79 @@ class Deadline(Base, LoggingMixin):
     def add_deadline(cls, deadline: Deadline, session: Session = NEW_SESSION):
         """Add the provided deadline to the table."""
         session.add(deadline)
+
+
+class DeadlineTrigger:
+    """
+    TODO:  better.
+
+    usage:
+
+    In the DAG define a deadline as
+
+    deadline=DeadlineAlert(
+        trigger=DeadlineTrigger.DAGRUN_EXECUTION_DATE,
+        interval=timedelta(hours=1),
+        callback=hello,
+    )
+
+    to parse the deadline trigger use DeadlineTrigger.evaluate(dag.deadline.trigger)
+    """
+
+    DAGRUN_EXECUTION_DATE = "dagrun_execution_date"
+
+    @staticmethod
+    def evaluate(trigger: str):
+        return eval(f"{__class__.__name__}().{trigger}()")
+
+    @staticmethod
+    def get_from_db(table_name, column_name):
+        # TODO:
+        #   fetch appropriate timestamp from db
+        #   cast to datetime
+        #   return
+        log.info("MOCKED Getting %s :: %s", table_name, column_name)
+        return datetime(2024, 1, 1)
+
+    def dagrun_execution_date(self) -> datetime:
+        return self.get_from_db("dagrun", "execution_date")
+
+
+class DeadlineAlert(LoggingMixin):
+    def __init__(
+        self,
+        trigger: type[DeadlineTrigger],
+        interval: timedelta,
+        callback: Callable | str,
+        callback_kwargs: dict | None = None,
+    ):
+        super().__init__()
+        self.trigger = trigger
+        self.interval = interval
+        self.callback_kwargs = callback_kwargs
+
+        if callable(callback):
+            # Get the reference path to the callable in the form `airflow.models.deadline.get_from_db`
+            # TODO:  confirm the value below is what we want
+            self.callback = callback
+        elif isinstance(callback, str):
+            # Check if the dotpath can resolve to a callable; store it or raise a ValueError
+            try:
+                eval(callback)
+                self.callback = callback
+            except NameError:
+                raise ValueError("callback is not a path to a callable")
+        else:
+            raise ValueError("callback must be a function or a str representing the dotpath to a callable.")
+
+    def serialize_deadline_alert(self):
+        from airflow.serialization.serialized_objects import BaseSerialization
+
+        return BaseSerialization.serialize(
+            {
+                "trigger": self.trigger,
+                "interval": self.interval,
+                "callback": self.callback,
+                "callback_kwargs": self.callback_kwargs,
+            }
+        )
