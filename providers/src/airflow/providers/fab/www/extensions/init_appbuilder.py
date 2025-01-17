@@ -22,7 +22,7 @@ import logging
 from functools import reduce
 from typing import TYPE_CHECKING
 
-from flask import Blueprint, current_app, url_for
+from flask import Blueprint, current_app, g, url_for
 from flask_appbuilder import __version__
 from flask_appbuilder.babel.manager import BabelManager
 from flask_appbuilder.const import (
@@ -39,7 +39,7 @@ from flask_appbuilder.menu import Menu
 from flask_appbuilder.views import IndexView
 
 from airflow import settings
-from airflow.api_fastapi.app import create_auth_manager
+from airflow.api_fastapi.app import create_auth_manager, get_auth_manager
 from airflow.configuration import conf
 from airflow.providers.fab.www.security_manager import AirflowSecurityManagerV2
 
@@ -109,6 +109,7 @@ class AirflowAppBuilder:
         base_template="airflow/main.html",
         static_folder="static/appbuilder",
         static_url_path="/appbuilder",
+        enable_plugins: bool = False,
     ):
         """
         App-builder constructor.
@@ -125,6 +126,15 @@ class AirflowAppBuilder:
             optional, your override for the global static folder
         :param static_url_path:
             optional, your override for the global static url path
+        :param enable_plugins:
+            optional, whether plugins are enabled for this app. AirflowAppBuilder from FAB provider can be
+            instantiated in two modes:
+             - Plugins enabled. The Flask application is responsible to execute Airflow 2 plugins.
+               This application is only running if there are Airflow 2 plugins defined as part of the Airflow
+               environment
+             - Plugins disabled. The Flask application is responsible to execute the FAB auth manager login
+               process. This application is only running if FAB auth manager is the auth manager configured
+               in the Airflow environment
         """
         from airflow.providers_manager import ProvidersManager
 
@@ -139,6 +149,7 @@ class AirflowAppBuilder:
         self.static_folder = static_folder
         self.static_url_path = static_url_path
         self.app = app
+        self.enable_plugins = enable_plugins
         self.update_perms = conf.getboolean("fab", "UPDATE_FAB_PERMS")
         self.auth_rate_limited = conf.getboolean("fab", "AUTH_RATE_LIMITED")
         self.auth_rate_limit = conf.get("fab", "AUTH_RATE_LIMIT")
@@ -282,6 +293,7 @@ class AirflowAppBuilder:
         """Register indexview, utilview (back function), babel views and Security views."""
         self.indexview = self._check_and_init(self.indexview)
         self.add_view_no_menu(self.indexview)
+        get_auth_manager().register_views()
 
     def _add_addon_views(self):
         """Register declared addons."""
@@ -500,7 +512,11 @@ class AirflowAppBuilder:
 
     @property
     def get_url_for_index(self):
-        # TODO: Return the fast api application homepage
+        if not self.enable_plugins and g.user is not None and g.user.is_authenticated:
+            # If plugins are disabled and the user is authenticated, it should be redirected to the Airflow 3 UI index page along with the JWT token
+            token = get_auth_manager().get_jwt_token(g.user)
+            return f"https://localhost:29091/webapp?token={token}"
+
         return url_for(f"{self.indexview.endpoint}.{self.indexview.default_view}")
 
     def get_url_for_locale(self, lang):
@@ -560,10 +576,11 @@ class AirflowAppBuilder:
                         view.get_init_inner_views().append(v)
 
 
-def init_appbuilder(app: Flask) -> AirflowAppBuilder:
+def init_appbuilder(app: Flask, enable_plugins: bool) -> AirflowAppBuilder:
     """Init `Flask App Builder <https://flask-appbuilder.readthedocs.io/en/latest/>`__."""
     return AirflowAppBuilder(
         app=app,
         session=settings.Session,
         base_template="airflow/main.html",
+        enable_plugins=enable_plugins,
     )
