@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import json
 from typing import Callable
+from unittest import mock
 
 import pytest
 import time_machine
 from sqlalchemy import select
 
 from airflow.models import DagRun
-from airflow.models.deadline import Deadline, DeadlineAlert
+from airflow.models.deadline import Deadline, DeadlineAlert, DeadlineTrigger
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.utils.state import DagRunState
 
@@ -157,3 +158,38 @@ class TestDeadlineAlert:
         else:
             with pytest.raises(ValueError, match="callback is not a path to a callable"):
                 DeadlineAlert.get_callback_path(callback_value)
+
+
+class TestDeadlineTrigger:
+    @staticmethod
+    def setup_method():
+        _clean_db()
+
+    @staticmethod
+    def teardown_method():
+        _clean_db()
+
+    @pytest.mark.parametrize(
+        "trigger_enum, trigger_kwargs",
+        [
+            pytest.param(DeadlineTrigger.DAGRUN_LOGICAL_DATE, {"dag_id": "DAG_ID"}, id="dag_logical_date"),
+            pytest.param(DeadlineTrigger.DAGRUN_QUEUED_AT, {"dag_id": "DAG_ID"}, id="dag_queued_at"),
+        ],
+    )
+    def test_evaluate_with(self, trigger_enum, trigger_kwargs):
+        with mock.patch.object(trigger_enum, "evaluate_with") as mock_trigger:
+            trigger_enum.evaluate_with(**trigger_kwargs)
+
+            mock_trigger.assert_called_once_with(**trigger_kwargs)
+
+    @pytest.mark.db_test
+    def test_dagrun_queued_at(self, dagrun):
+        trigger = DeadlineTrigger.DAGRUN_QUEUED_AT.evaluate_with(dag_id=dagrun.dag_id)
+
+        assert dagrun.queued_at == trigger
+
+    @pytest.mark.db_test
+    def test_dagrun_logical_date(self, dagrun):
+        trigger = DeadlineTrigger.DAGRUN_LOGICAL_DATE.evaluate_with(dag_id=dagrun.dag_id)
+
+        assert dagrun.logical_date == trigger

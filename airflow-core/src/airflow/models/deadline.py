@@ -19,11 +19,12 @@ from __future__ import annotations
 import logging
 import sys
 from datetime import datetime, timedelta
+from enum import Enum
 from typing import TYPE_CHECKING, Callable
 
 import sqlalchemy_jsonfield
 import uuid6
-from sqlalchemy import Column, ForeignKey, Index, Integer, String
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, select
 from sqlalchemy_utils import UUIDType
 
 from airflow.models.base import Base, StringID
@@ -97,7 +98,7 @@ class Deadline(Base, LoggingMixin):
         session.add(deadline)
 
 
-class DeadlineTrigger:
+class DeadlineTrigger(Enum):
     """
     Store the calculation methods for the various Deadline Alert triggers.
 
@@ -113,28 +114,58 @@ class DeadlineTrigger:
         callback=hello,
     )
 
-    to parse the deadline trigger use DeadlineTrigger(dag.deadline.trigger).evaluate_with(dag_id=dag.dag_id)
+    to parse the deadline trigger use dag.deadline.trigger.evaluate_with(dag_id=dag.dag_id)
     """
 
     DAGRUN_LOGICAL_DATE = "dagrun_logical_date"
+    DAGRUN_QUEUED_AT = "dagrun_queued_at"
+    _CUSTOM_TRIGGER_BASE = "_custom_trigger"  # Generic base for all custom triggers
 
-    def __init__(self, trigger):
-        self.trigger = trigger
+    def __init__(self, value):
+        self._value_ = value
+        self._fixed_dt = None  # Initialize the storage for fixed datetime
+
+    @classmethod
+    def FIXED_DATETIME(cls, dt: datetime):
+        instance = object.__new__(cls)
+        instance._value_ = cls._CUSTOM_TRIGGER_BASE.value
+        instance._fixed_dt = dt
+        return instance
 
     def evaluate_with(self, **kwargs):
-        return eval(f"self.{self.trigger}")(**kwargs)
+        if self._fixed_dt:
+            return self._fixed_dt
+        return getattr(self, self.value)(**kwargs)
 
-    @staticmethod
-    def get_from_db(table_name, column_name):
-        # TODO:
-        #   fetch appropriate timestamp from db
-        #   cast to datetime
-        #   return
-        log.info("MOCKED Getting %s :: %s", table_name, column_name)
-        return datetime(2024, 1, 1)
+    @provide_session
+    def _fetch_from_db(self, model_class: Base, column: str, session=None, **conditions) -> datetime:
+        """
+        Fetch a datetime stored in the database.
 
-    def dagrun_logical_date(self) -> datetime:
-        return self.get_from_db("dagrun", "logical_date")
+        :param model_class: The Airflow model class (e.g., DagRun, TaskInstance, etc.)
+        :param column: The column name to fetch
+        :param session: SQLAlchemy session (provided by decorator)
+
+        :param conditions: Key-value pairs which are passed to the WHERE clause
+        """
+        query = select(getattr(model_class, column))
+
+        for key, value in conditions.items():
+            query = query.where(getattr(model_class, key) == value)
+        # This should build a query similar to:
+        # session.scalar(select(DagRun.logical_date).where(DagRun.dag_id == dag_id))
+        log.debug("db query: session.scalar(%s)", query)
+        return session.scalar(query)
+
+    def dagrun_logical_date(self, dag_id: str) -> datetime:
+        from airflow.models import DagRun
+
+        return self._fetch_from_db(model_class=DagRun, column="logical_date", dag_id=dag_id)
+
+    def dagrun_queued_at(self, dag_id: str) -> datetime:
+        from airflow.models import DagRun
+
+        return self._fetch_from_db(model_class=DagRun, column="queued_at", dag_id=dag_id)
 
 
 class DeadlineAlert(LoggingMixin):
@@ -142,7 +173,7 @@ class DeadlineAlert(LoggingMixin):
 
     def __init__(
         self,
-        trigger: type[DeadlineTrigger] | datetime,
+        trigger: DeadlineTrigger,
         interval: timedelta,
         callback: Callable | str,
         callback_kwargs: dict | None = None,
