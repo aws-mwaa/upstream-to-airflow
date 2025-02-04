@@ -23,13 +23,14 @@ from typing import TYPE_CHECKING, Callable
 
 import sqlalchemy_jsonfield
 import uuid6
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, select
 from sqlalchemy_utils import UUIDType
 
 from airflow.models.base import Base, StringID
 from airflow.settings import json
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.session import NEW_SESSION, provide_session
+from airflow.utils.sqlalchemy import UtcDateTime
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -49,7 +50,7 @@ class Deadline(Base, LoggingMixin):
     dagrun_id = Column(Integer, ForeignKey("dag_run.id", ondelete="CASCADE"))
 
     # The time after which the Deadline has passed and the callback should be triggered.
-    deadline = Column(DateTime, nullable=False)
+    deadline = Column(UtcDateTime, nullable=False)
     # The Callback to be called when the Deadline has passed.
     callback = Column(String(500), nullable=False)
     # Serialized kwargs to pass to the callback.
@@ -94,11 +95,12 @@ class Deadline(Base, LoggingMixin):
     def add_deadline(cls, deadline: Deadline, session: Session = NEW_SESSION):
         """Add the provided deadline to the table."""
         session.add(deadline)
+        print()
 
 
 class DeadlineTrigger:
     """
-    Store the calculation methods for the various SDeadline Alert triggers.
+    Store the calculation methods for the various Deadline Alert triggers.
 
     TODO:  Embetter this docstring muchly.
 
@@ -107,31 +109,35 @@ class DeadlineTrigger:
     In the DAG define a deadline as
 
     deadline=DeadlineAlert(
-        trigger=DeadlineTrigger.DAGRUN_EXECUTION_DATE,
+        trigger=DeadlineTrigger.DAGRUN_LOGICAL_DATE,
         interval=timedelta(hours=1),
         callback=hello,
     )
 
-    to parse the deadline trigger use DeadlineTrigger.evaluate(dag.deadline.trigger)
+    to parse the deadline trigger use DeadlineTrigger(dag.deadline.trigger).evaluate_with(dag_id=dag.dag_id)
     """
 
-    DAGRUN_EXECUTION_DATE = "dagrun_execution_date"
+    DAGRUN_LOGICAL_DATE = "dagrun_logical_date"
+    DAGRUN_QUEUED_AT = "dagrun_queued_at"
 
-    @staticmethod
-    def evaluate(trigger: str):
-        return eval(f"DeadlineTrigger().{trigger}()")
+    def __init__(self, trigger):
+        self.trigger = trigger
 
-    @staticmethod
-    def get_from_db(table_name, column_name):
-        # TODO:
-        #   fetch appropriate timestamp from db
-        #   cast to datetime
-        #   return
-        log.info("MOCKED Getting %s :: %s", table_name, column_name)
-        return datetime(2024, 1, 1)
+    def evaluate_with(self, **kwargs):
+        return eval(f"self.{self.trigger}")(**kwargs)
 
-    def dagrun_execution_date(self) -> datetime:
-        return self.get_from_db("dagrun", "execution_date")
+    @provide_session
+    def dagrun_logical_date(self, session, dag_id: str) -> datetime:
+        # logical_date used to be called execution_date, it is the actual start time.
+        from airflow.models import DagRun
+
+        return session.scalar(select(DagRun.logical_date).where(DagRun.dag_id == dag_id))
+
+    @provide_session
+    def dagrun_queued_at(self, session, dag_id: str) -> datetime:
+        from airflow.models import DagRun
+
+        return session.scalar(select(DagRun.queued_at).where(DagRun.dag_id == dag_id))
 
 
 class DeadlineAlert(LoggingMixin):
