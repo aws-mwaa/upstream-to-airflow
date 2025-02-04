@@ -63,8 +63,9 @@ from airflow.api_fastapi.core_api.openapi.exceptions import create_openapi_http_
 from airflow.api_fastapi.logging.decorators import action_logging
 from airflow.exceptions import ParamValidationError
 from airflow.listeners.listener import get_listener_manager
-from airflow.models import DAG, DagModel, DagRun
+from airflow.models import DAG, DagModel, DagRun, Deadline
 from airflow.models.dag_version import DagVersion
+from airflow.models.deadline import DeadlineTrigger
 from airflow.timetables.base import DataInterval
 from airflow.utils import timezone
 from airflow.utils.state import DagRunState
@@ -397,6 +398,18 @@ def trigger_dag_run(
             state=DagRunState.QUEUED,
             session=session,
         )
+
+        if dag.has_dagrun_deadline():
+            Deadline.add_deadline(
+                Deadline(
+                    deadline=DeadlineTrigger(dag.deadline.trigger).evaluate_with(dag_id=dag.dag_id),
+                    callback=dag.deadline.callback,
+                    callback_kwargs=dag.deadline.callback_kwargs or {},
+                    dag_id=dag.dag_id,
+                    dagrun_id=dag_run.run_id,
+                )
+            )
+
         dag_run_note = body.note
         if dag_run_note:
             current_user_id = None  # refer to https://github.com/apache/airflow/issues/43534

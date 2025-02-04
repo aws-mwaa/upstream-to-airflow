@@ -464,6 +464,16 @@ class DAG(TaskSDKDag, LoggingMixin):
                         "update the executor configuration for this task."
                     )
 
+    def has_dagrun_deadline(self):
+        if not self.deadline:
+            return False
+
+        if isinstance(self.deadline.trigger, datetime) or "dagrun" in self.deadline.trigger:
+            # If the trigger is a fixed timestamp, then consider it a dagrun deadline.
+            return True
+
+        return False
+
     @staticmethod
     def _upgrade_outdated_dag_access_control(access_control=None):
         """Look for outdated dag level actions in DAG access_controls and replace them with updated actions."""

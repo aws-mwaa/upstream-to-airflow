@@ -119,6 +119,9 @@ class DeadlineTrigger:
     DAGRUN_LOGICAL_DATE = "dagrun_logical_date"
     DAGRUN_QUEUED_AT = "dagrun_queued_at"
 
+    # TODO: Remove "_EMPTY" once we have another Trigger type to test dag.has_dagrun_deadline() against.
+    _EMPTY = ""
+
     def __init__(self, trigger):
         self.trigger = trigger
 

@@ -63,6 +63,7 @@ from airflow.models.dag import (
 )
 from airflow.models.dag_version import DagVersion
 from airflow.models.dagrun import DagRun
+from airflow.models.deadline import DeadlineAlert, DeadlineTrigger
 from airflow.models.serialized_dag import SerializedDagModel
 from airflow.models.taskinstance import TaskInstance as TI
 from airflow.providers.standard.operators.bash import BashOperator
@@ -2104,6 +2105,49 @@ my_postgres_conn:
         assert dag.get_bundle_version() is None
         DAG.bulk_write_to_db("testing", "abc", [dag])
         assert dag.get_bundle_version() == "abc"
+
+    @pytest.mark.parametrize(
+        "deadline_under_test, expected_result",
+        [
+            pytest.param(
+                DeadlineAlert(
+                    trigger=DeadlineTrigger.DAGRUN_LOGICAL_DATE,
+                    interval=timedelta(hours=1),
+                    callback=lambda: 1,
+                ),
+                True,
+                id="deadline_alert_is_dagrun_related",
+            ),
+            pytest.param(
+                DeadlineAlert(
+                    trigger=datetime.datetime(2025, 1, 1, 9, 30),
+                    interval=timedelta(hours=1),
+                    callback=lambda: 1,
+                ),
+                True,
+                id="trigger_is_a_datetime",
+            ),
+            pytest.param(
+                DeadlineAlert(
+                    trigger=DeadlineTrigger._EMPTY,
+                    interval=timedelta(hours=1),
+                    callback=lambda: 1,
+                ),
+                False,
+                id="deadline_alert_is_not_dagrun_related",
+            ),
+            pytest.param(
+                None,
+                False,
+                id="no_deadline",
+            ),
+        ],
+    )
+    def test_has_dagrun_deadline(self, deadline_under_test, expected_result):
+        deadline = {"deadline": deadline_under_test} if deadline_under_test else {}
+        dag = DAG("dag", **deadline)
+
+        assert dag.has_dagrun_deadline() is expected_result
 
 
 class TestDagModel:
