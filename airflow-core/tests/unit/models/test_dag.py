@@ -58,6 +58,7 @@ from airflow.models.dag import (
     get_asset_triggered_next_run_info,
 )
 from airflow.models.dagrun import DagRun
+from airflow.models.deadline import DeadlineAlert, DeadlineTrigger
 from airflow.models.serialized_dag import SerializedDagModel
 from airflow.models.taskinstance import TaskInstance as TI
 from airflow.providers.standard.operators.bash import BashOperator
