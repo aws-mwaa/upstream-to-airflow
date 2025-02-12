@@ -24,11 +24,15 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Annotated, Any, Union
 
-from pydantic import BaseModel, Discriminator, Field, JsonValue, Tag, model_serializer
-from pydantic import SerializerFunctionWrapHandler
-from pydantic.functional_serializers import WrapSerializer
+from pydantic import (
+    BaseModel,
+    Discriminator,
+    JsonValue,
+    SerializerFunctionWrapHandler,
+    Tag,
+    model_serializer,
+)
 
-from airflow.typing_compat import Literal
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 

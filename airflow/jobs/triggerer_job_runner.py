@@ -57,7 +57,6 @@ if TYPE_CHECKING:
     from structlog.typing import FilteringBoundLogger, WrappedLogger
 
     from airflow.jobs.job import Job
-    from airflow.models import TaskInstance
     from airflow.triggers.base import BaseTrigger
 
 HANDLER_SUPPORTS_TRIGGERER = False
@@ -157,38 +156,42 @@ class TriggererJobRunner(BaseJobRunner, LoggingMixin):
 log: FilteringBoundLogger = structlog.get_logger(logger_name=__name__)
 
 
-class StartTriggerer(BaseModel):
-    requests_fd: int
-    type: Literal["StartTriggerer"] = "StartTriggerer"
+# Using this as a simple namespace
+class messages:  # noqa: D101
+    class StartTriggerer(BaseModel):
+        """Tell the async trigger runner process to start, and where to send status update messages."""
 
+        requests_fd: int
+        type: Literal["StartTriggerer"] = "StartTriggerer"
 
-class CancelTriggers(BaseModel):
-    ids: Iterable[int]
-    type: Literal["CancelTriggersMessage"] = "CancelTriggersMessage"
+    class CancelTriggers(BaseModel):
+        """Request to cancel running triggers"""
+
+        ids: Iterable[int]
+        type: Literal["CancelTriggersMessage"] = "CancelTriggersMessage"
+
+    class TriggerStateChanges(BaseModel):
+        """Report state change about triggers back to the TriggerRunnerMonitor."""
+
+        type: Literal["TriggerStateChanges"] = "TriggerStateChanges"
+        events: Annotated[
+            list[tuple[int, events.DiscrimatedTriggerEvent]] | None,
+            # We have to specify a default here, as otherwise Pydantic struggles to deal with the discriminated
+            # union :shrug:
+            Field(default=None),
+        ]
+        failures: list[tuple[int, str]] | None = None
+        finished: list[int] | None = None
 
 
 ToAsyncProcess = Annotated[
-    Union[workloads.RunTrigger, CancelTriggers, StartTriggerer],
+    Union[workloads.RunTrigger, messages.CancelTriggers, messages.StartTriggerer],
     Field(discriminator="type"),
 ]
 
 
-class TriggerStateChanges(BaseModel):
-    """Report state change about triggers back to the TriggerRunnerMonitor."""
-
-    type: Literal["TriggerStateChanges"] = "TriggerStateChanges"
-    events: Annotated[
-        list[tuple[int, events.DiscrimatedTriggerEvent]] | None,
-        # We have to specify a default here, as otherwise Pydantic stuggles to deal with the discrimated union
-        # :shrug:
-        Field(default=None),
-    ]
-    failures: list[tuple[int, str]] | None = None
-    finished: list[int] | None = None
-
-
 ToSyncProcess = Annotated[
-    Union[TriggerStateChanges],
+    Union[messages.TriggerStateChanges],
     Field(discriminator="type"),
 ]
 
@@ -270,18 +273,18 @@ class TriggerRunnerMonitor(WatchedSubprocess):
     ):
         proc = super().start(id=job.id, job=job, target=cls.run_in_process, logger=logger, **kwargs)
 
-        msg = StartTriggerer(requests_fd=proc._requests_fd).model_dump_json().encode() + b"\n"
+        msg = messages.StartTriggerer(requests_fd=proc._requests_fd).model_dump_json().encode() + b"\n"
         proc.stdin.write(msg)
         return proc
 
     def _handle_request(self, msg: ToSyncProcess, log: FilteringBoundLogger) -> None:  # type: ignore[override]
-        if isinstance(msg, TriggerStateChanges):
+        if isinstance(msg, messages.TriggerStateChanges):
             log.debug("State change from async process", state=msg)
             if msg.events:
                 self.events.extend(msg.events)
             if msg.failures:
                 self.failed_triggers.extend(msg.failures)
-            for id in msg.finished or tuple():
+            for id in msg.finished or ():
                 self.running_triggers.discard(id)
                 self.cancelling_triggers.discard(id)
                 # TODO: Close logger? Or is deleting it enough
@@ -442,7 +445,9 @@ class TriggerRunnerMonitor(WatchedSubprocess):
         if cancel_trigger_ids:
             # Enqueue orphaned triggers for cancellation
             self.cancelling_triggers.update(cancel_trigger_ids)
-            self.stdin.write(CancelTriggers(ids=cancel_trigger_ids).model_dump_json().encode("utf-8") + b"\n")
+            self.stdin.write(
+                messages.CancelTriggers(ids=cancel_trigger_ids).model_dump_json().encode("utf-8") + b"\n"
+            )
 
     def _register_pipe_readers(
         self, logger: FilteringBoundLogger, stdout: socket, stderr: socket, requests: socket, logs: socket
@@ -640,8 +645,8 @@ class TriggerRunner:
 
         decoder = TypeAdapter[ToAsyncProcess](ToAsyncProcess)
         msg = decoder.validate_json(line)
-        if not isinstance(msg, StartTriggerer) or msg.requests_fd <= 0:
-            raise RuntimeError(f"First message to triggerer must be {StartTriggerer.__name__}")
+        if not isinstance(msg, messages.StartTriggerer) or msg.requests_fd <= 0:
+            raise RuntimeError(f"First message to triggerer must be {messages.StartTriggerer.__name__}")
 
         writer_transport, writer_protocol = await loop.connect_write_pipe(
             lambda: asyncio.streams.FlowControlMixin(loop=loop),
@@ -657,7 +662,7 @@ class TriggerRunner:
 
             if isinstance(msg, workloads.RunTrigger):
                 self.to_create.append(msg)
-            elif isinstance(msg, CancelTriggers):
+            elif isinstance(msg, messages.CancelTriggers):
                 self.to_cancel.extend(msg.ids)
             else:
                 raise ValueError(f"Unknown workload type {type(msg)}")
@@ -771,7 +776,9 @@ class TriggerRunner:
             data = self.failed_triggers.popleft()
             failures_to_send.append(data)
 
-        msg = TriggerStateChanges(events=events_to_send, finished=finished_ids, failures=failures_to_send)
+        msg = messages.TriggerStateChanges(
+            events=events_to_send, finished=finished_ids, failures=failures_to_send
+        )
 
         # Only send a message if there is anything to say
         if not events_to_send:

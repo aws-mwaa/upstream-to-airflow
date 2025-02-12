@@ -17,10 +17,10 @@
 from __future__ import annotations
 
 import datetime
+import logging
 from collections.abc import Iterable
 from enum import Enum
 from functools import singledispatch
-import logging
 from traceback import format_exception
 from typing import TYPE_CHECKING, Any
 
