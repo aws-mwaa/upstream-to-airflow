@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -104,6 +104,24 @@ class ExecuteTask(BaseWorkload):
         path = dag_rel_path or Path(ti.dag_run.dag_model.relative_fileloc)
         fname = log_filename_template_renderer()(ti=ti)
         return cls(ti=ser_ti, dag_rel_path=path, token="", log_path=fname, bundle_info=bundle_info)
+
+
+class RunTrigger(BaseModel):
+    """Execute an async "trigger" process that yields events."""
+
+    id: int
+
+    ti: TaskInstance | None
+
+    classpath: str
+    """
+    Dot-separated name of the module+fn to import and run this workload.
+
+    Consumers of this Workload must perform their own validation of this input.
+    """
+
+    kwargs: dict[str, Any]
+    type: Literal["RunTriggerWorkload"] = Field(init=False, default="RunTriggerWorkload")
 
 
 All = Union[ExecuteTask]

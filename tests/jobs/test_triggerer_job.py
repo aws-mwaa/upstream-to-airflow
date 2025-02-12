@@ -245,8 +245,8 @@ def test_trigger_lifecycle(session):
     try:
         # Wait for up to 3 seconds for it to appear in the TriggerRunner's storage
         for _ in range(30):
-            if job_runner.trigger_runner.triggers:
-                assert list(job_runner.trigger_runner.triggers.keys()) == [1]
+            if job_runner.trigger_runner.running_triggers:
+                assert list(job_runner.trigger_runner.running_triggers.keys()) == [1]
                 break
             time.sleep(0.1)
         else:
@@ -258,7 +258,7 @@ def test_trigger_lifecycle(session):
         job_runner.load_triggers()
         # Wait for up to 3 seconds for it to vanish from the TriggerRunner's storage
         for _ in range(30):
-            if not job_runner.trigger_runner.triggers:
+            if not job_runner.trigger_runner.running_triggers:
                 break
             time.sleep(0.1)
         else:
@@ -370,8 +370,8 @@ async def test_trigger_create_race_condition_38599(session, tmp_path):
     assert len(job_runner1.trigger_runner.to_create) == 1
     # Before calling job_runner1.handle_events, run the trigger synchronously
     await job_runner1.trigger_runner.create_triggers()
-    assert len(job_runner1.trigger_runner.triggers) == 1
-    _, trigger_task_info = next(iter(job_runner1.trigger_runner.triggers.items()))
+    assert len(job_runner1.trigger_runner.running_triggers) == 1
+    _, trigger_task_info = next(iter(job_runner1.trigger_runner.running_triggers.items()))
     await trigger_task_info["task"]
     assert trigger_task_info["task"].done()
 
