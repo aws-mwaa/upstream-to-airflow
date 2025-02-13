@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Union
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -112,6 +112,11 @@ class RunTrigger(BaseModel):
     id: int
 
     ti: TaskInstance | None
+    """
+    The task instance associated with this tirgger.
+
+    Could be none for asset-based triggers.
+    """
 
     classpath: str
     """
@@ -121,7 +126,10 @@ class RunTrigger(BaseModel):
     """
 
     kwargs: dict[str, Any]
-    type: Literal["RunTriggerWorkload"] = Field(init=False, default="RunTriggerWorkload")
+    kind: Literal["RunTrigger"] = Field(init=False, default="RunTrigger")
 
 
-All = Union[ExecuteTask]
+All = Annotated[
+    Union[ExecuteTask, RunTrigger],
+    Field(discriminator="kind"),
+]

@@ -82,6 +82,9 @@ def _run_worker(
             # Received poison pill, no more tasks to run
             return
 
+        if not isinstance(workload, workloads.ExecuteTask):
+            raise ValueError(f"LocalExecutor does not now how to handle {type(workload)}")
+
         # Decrement this as soon as we pick up a message off the queue
         with unread_messages:
             unread_messages.value -= 1

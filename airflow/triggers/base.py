@@ -175,9 +175,9 @@ class BaseTaskEndEvent(TriggerEvent):
     """
 
     task_instance_state: TaskInstanceState
-    xcoms: JsonValue = None
+    xcoms: dict[str, JsonValue] | None = None
 
-    def __init__(self, *, xcoms: dict[str, Any] | None = None, **kwargs) -> None:
+    def __init__(self, *, xcoms: dict[str, JsonValue] | None = None, **kwargs) -> None:
         """
         Initialize the class with the specified parameters.
 

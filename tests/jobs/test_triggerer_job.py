@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-import importlib
 import time
 from threading import Thread
 from unittest.mock import MagicMock, patch
@@ -28,10 +27,8 @@ import aiofiles
 import pendulum
 import pytest
 
-from airflow.config_templates import airflow_local_settings
 from airflow.jobs.job import Job
-from airflow.jobs.triggerer_job_runner import TriggererJobRunner, TriggerRunner, setup_queue_listener
-from airflow.logging_config import configure_logging
+from airflow.jobs.triggerer_job_runner import TriggererJobRunner, TriggerRunner
 from airflow.models import DagModel, DagRun, TaskInstance, Trigger
 from airflow.models.baseoperator import BaseOperator
 from airflow.models.dag import DAG
@@ -41,15 +38,11 @@ from airflow.providers.standard.triggers.temporal import DateTimeTrigger, TimeDe
 from airflow.triggers.base import TriggerEvent
 from airflow.triggers.testing import FailureTrigger, SuccessTrigger
 from airflow.utils import timezone
-from airflow.utils.log.logging_mixin import RedirectStdHandler
-from airflow.utils.log.trigger_handler import LocalQueueHandler
 from airflow.utils.session import create_session
 from airflow.utils.state import State, TaskInstanceState
 from airflow.utils.types import DagRunType
 
-from tests.core.test_logging_config import reset_logging
 from tests_common.test_utils.db import clear_db_dags, clear_db_runs
-from tests_common.test_utils.log_handlers import non_pytest_handlers
 
 pytestmark = pytest.mark.db_test
 
@@ -731,49 +724,3 @@ def test_invalid_trigger(session, dag_maker):
     assert task_instance.next_method == "__fail__"
     assert task_instance.next_kwargs["error"] == "Trigger failure"
     assert task_instance.next_kwargs["traceback"][-1] == "ModuleNotFoundError: No module named 'fake'\n"
-
-
-@pytest.mark.parametrize("should_wrap", (True, False))
-@patch("airflow.jobs.triggerer_job_runner.configure_trigger_log_handler")
-def test_handler_config_respects_donot_wrap(mock_configure, should_wrap):
-    from airflow.jobs import triggerer_job_runner
-
-    triggerer_job_runner.DISABLE_WRAPPER = not should_wrap
-    job = Job()
-    TriggererJobRunner(job=job)
-    if should_wrap:
-        mock_configure.assert_called()
-    else:
-        mock_configure.assert_not_called()
-
-
-@patch("airflow.jobs.triggerer_job_runner.setup_queue_listener")
-def test_triggerer_job_always_creates_listener(mock_setup):
-    mock_setup.assert_not_called()
-    job = Job()
-    TriggererJobRunner(job=job)
-    mock_setup.assert_called()
-
-
-def test_queue_listener():
-    """
-    When listener func called, root handlers should be moved to queue listener
-    and replaced with queuehandler.
-    """
-    reset_logging()
-    importlib.reload(airflow_local_settings)
-    configure_logging()
-
-    import logging
-
-    log = logging.getLogger()
-    handlers = non_pytest_handlers(log.handlers)
-    assert len(handlers) == 1
-    handler = handlers[0]
-    assert handler.__class__ == RedirectStdHandler
-    listener = setup_queue_listener()
-    assert handler not in non_pytest_handlers(log.handlers)
-    qh = log.handlers[-1]
-    assert qh.__class__ == LocalQueueHandler
-    assert qh.queue == listener.queue
-    listener.stop()
