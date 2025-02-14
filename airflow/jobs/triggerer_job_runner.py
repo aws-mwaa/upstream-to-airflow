@@ -70,6 +70,12 @@ visible in task logs.
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "TriggerRunner",
+    "TriggerRunnerSupervisor",
+    "TriggererJobRunner",
+]
+
 
 class TriggererJobRunner(BaseJobRunner, LoggingMixin):
     """
@@ -149,7 +155,6 @@ class TriggererJobRunner(BaseJobRunner, LoggingMixin):
             # Tell the subtproc to stop and then wait for it.
             # If the user interrupts/terms again, _graceful_exit will allow them
             # to force-kill here.
-            # self.trigger_runner.stop = True
             self.trigger_runner.kill(escalation_delay=10, force=True)
             self.log.info("Exited trigger loop")
         return None
@@ -159,7 +164,7 @@ log: FilteringBoundLogger = structlog.get_logger(logger_name=__name__)
 
 
 # Using this as a simple namespace
-class messages:  # noqa: D101
+class messages:
     class StartTriggerer(BaseModel):
         """Tell the async trigger runner process to start, and where to send status update messages."""
 
@@ -167,7 +172,7 @@ class messages:  # noqa: D101
         kind: Literal["StartTriggerer"] = "StartTriggerer"
 
     class CancelTriggers(BaseModel):
-        """Request to cancel running triggers"""
+        """Request to cancel running triggers."""
 
         ids: Iterable[int]
         kind: Literal["CancelTriggersMessage"] = "CancelTriggersMessage"
@@ -226,14 +231,10 @@ class TriggerLoggingFactory:
 @attrs.define(kw_only=True)
 class TriggerRunnerSupervisor(WatchedSubprocess):
     """
-    TriggerRunnerProcess runs an async trigger loop in another thread to ensure database isolation.
+    TriggerRunnerSupervisor is responsible for monitoring the subprocess and marshalling DB access.
 
-    For speed of implementation when moving from Airflow 2 to Airflow 3 (in process database access to
-    isolated) we have kept the reactor/async loop running in a thread, when in practice it could be done
-    directly in the main thread by reading the JSON messages on stdin, but that.
-
-    In short: this class and the thread should be avoided -- it's writen this way for speed of implementation.
-    Sorry folks. @ashb -- 2025/02/10
+    This class (which runs in the main process) is responsible for querying the DB, sending RunTrigger
+    workload messages to the subprocess, and collecting results and updating them in the DB.
     """
 
     job: Job
@@ -443,7 +444,6 @@ class TriggerRunnerSupervisor(WatchedSubprocess):
 
             to_create.append(workload)
 
-        # TODO: Send to subprocess
         for workload in to_create:
             self._send(workload)
         self.running_triggers.update(m.id for m in to_create)
