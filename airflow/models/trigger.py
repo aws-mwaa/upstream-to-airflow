@@ -272,7 +272,10 @@ class Trigger(Base):
             )
         ):
             # Add the error and set the next_method to the fail state
-            traceback = format_exception(type(exc), exc, exc.__traceback__) if exc else None
+            if isinstance(exc, BaseException):
+                traceback = format_exception(type(exc), exc, exc.__traceback__)
+            else:
+                traceback = exc
             task_instance.next_method = TRIGGER_FAIL_REPR
             task_instance.next_kwargs = {
                 "error": TriggerFailureReason.TRIGGER_FAILURE,

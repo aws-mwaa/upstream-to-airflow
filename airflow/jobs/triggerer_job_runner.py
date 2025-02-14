@@ -27,6 +27,7 @@ from collections import deque
 from collections.abc import Generator, Iterable
 from contextlib import suppress
 from datetime import datetime
+from traceback import format_exception
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypedDict, Union
 
 import attrs
@@ -133,14 +134,15 @@ class TriggererJobRunner(BaseJobRunner, LoggingMixin):
         self.log.info("Starting the triggerer")
         try:
             # Kick off runner sub-process without DB access
-            self.trigger_runner = TriggerRunnerMonitor.start(
+            self.trigger_runner = TriggerRunnerSupervisor.start(
                 job=self.job, capacity=self.capacity, logger=structlog.get_logger(logger_name="triggerer2")
             )
 
             # Run the main DB comms loop in this process
             self.trigger_runner.run_db_loop()
+            return self.trigger_runner._exit_code
         except Exception:
-            self.log.exception("Exception when executing TriggerRunnerMonitor.run_db_loop")
+            self.log.exception("Exception when executing TriggerRunnerSupervisor.run_db_loop")
             raise
         finally:
             self.log.info("Waiting for triggers to clean up")
@@ -162,37 +164,38 @@ class messages:  # noqa: D101
         """Tell the async trigger runner process to start, and where to send status update messages."""
 
         requests_fd: int
-        type: Literal["StartTriggerer"] = "StartTriggerer"
+        kind: Literal["StartTriggerer"] = "StartTriggerer"
 
     class CancelTriggers(BaseModel):
         """Request to cancel running triggers"""
 
         ids: Iterable[int]
-        type: Literal["CancelTriggersMessage"] = "CancelTriggersMessage"
+        kind: Literal["CancelTriggersMessage"] = "CancelTriggersMessage"
 
     class TriggerStateChanges(BaseModel):
-        """Report state change about triggers back to the TriggerRunnerMonitor."""
+        """Report state change about triggers back to the TriggerRunnerSupervisor."""
 
-        type: Literal["TriggerStateChanges"] = "TriggerStateChanges"
+        kind: Literal["TriggerStateChanges"] = "TriggerStateChanges"
         events: Annotated[
             list[tuple[int, events.DiscrimatedTriggerEvent]] | None,
             # We have to specify a default here, as otherwise Pydantic struggles to deal with the discriminated
             # union :shrug:
             Field(default=None),
         ]
-        failures: list[tuple[int, str]] | None = None
+        # Format of list[str] is the exc traceback format
+        failures: list[tuple[int, list[str] | None]] | None = None
         finished: list[int] | None = None
 
 
 ToAsyncProcess = Annotated[
     Union[workloads.RunTrigger, messages.CancelTriggers, messages.StartTriggerer],
-    Field(discriminator="type"),
+    Field(discriminator="kind"),
 ]
 
 
 ToSyncProcess = Annotated[
     Union[messages.TriggerStateChanges],
-    Field(discriminator="type"),
+    Field(discriminator="kind"),
 ]
 
 
@@ -221,7 +224,7 @@ class TriggerLoggingFactory:
 
 
 @attrs.define(kw_only=True)
-class TriggerRunnerMonitor(WatchedSubprocess):
+class TriggerRunnerSupervisor(WatchedSubprocess):
     """
     TriggerRunnerProcess runs an async trigger loop in another thread to ensure database isolation.
 
@@ -256,8 +259,7 @@ class TriggerRunnerMonitor(WatchedSubprocess):
     events: deque[tuple[int, events.TriggerEvent]] = attrs.field(factory=deque, init=False)
 
     # Outbound queue of failed triggers
-    # failed_triggers: deque[tuple[int, BaseException]] = attrs.field(factory=deque, init=False)
-    failed_triggers: deque[tuple[int, str]] = attrs.field(factory=deque, init=False)
+    failed_triggers: deque[tuple[int, list[str] | None]] = attrs.field(factory=deque, init=False)
 
     def is_alive(self) -> bool:
         # Set by `_service_subprocess` in the loop
@@ -273,8 +275,8 @@ class TriggerRunnerMonitor(WatchedSubprocess):
     ):
         proc = super().start(id=job.id, job=job, target=cls.run_in_process, logger=logger, **kwargs)
 
-        msg = messages.StartTriggerer(requests_fd=proc._requests_fd).model_dump_json().encode() + b"\n"
-        proc.stdin.write(msg)
+        msg = messages.StartTriggerer(requests_fd=proc._requests_fd)
+        proc._send(msg)
         return proc
 
     def _handle_request(self, msg: ToSyncProcess, log: FilteringBoundLogger) -> None:  # type: ignore[override]
@@ -297,7 +299,7 @@ class TriggerRunnerMonitor(WatchedSubprocess):
         """Run synchronously and handle all database reads/writes."""
         while not self.stop:
             if not self.is_alive():
-                log.error("Trigger runner thread has died! Exiting.")
+                log.error("Trigger runner process has died! Exiting.")
                 break
             with Trace.start_span(span_name="triggerer_job_loop", component="TriggererJobRunner") as span:
                 # Wait for up to 1 second for activity
@@ -371,6 +373,9 @@ class TriggerRunnerMonitor(WatchedSubprocess):
             }
         )
 
+    def _send(self, msg: BaseModel):
+        self.stdin.write(msg.model_dump_json().encode("utf-8") + b"\n")
+
     def update_triggers(self, requested_trigger_ids: set[int]):
         """
         Request that we update what triggers we're running.
@@ -420,7 +425,7 @@ class TriggerRunnerMonitor(WatchedSubprocess):
             workload = workloads.RunTrigger(
                 classpath=new_trigger_orm.classpath,
                 id=new_id,
-                kwargs=new_trigger_orm.kwargs,
+                encrypted_kwargs=new_trigger_orm.encrypted_kwargs,
                 ti=None,
             )
             if new_trigger_orm.task_instance:
@@ -434,20 +439,19 @@ class TriggerRunnerMonitor(WatchedSubprocess):
                     new_trigger_orm.task_instance, from_attributes=True
                 )
                 workload.ti = ser_ti
+                workload.timeout_after = new_trigger_orm.task_instance.trigger_timeout
 
             to_create.append(workload)
 
         # TODO: Send to subprocess
         for workload in to_create:
-            self.stdin.write(workload.model_dump_json().encode("utf-8") + b"\n")
+            self._send(workload)
         self.running_triggers.update(m.id for m in to_create)
 
         if cancel_trigger_ids:
             # Enqueue orphaned triggers for cancellation
             self.cancelling_triggers.update(cancel_trigger_ids)
-            self.stdin.write(
-                messages.CancelTriggers(ids=cancel_trigger_ids).model_dump_json().encode("utf-8") + b"\n"
-            )
+            self._send(messages.CancelTriggers(ids=cancel_trigger_ids))
 
     def _register_pipe_readers(
         self, logger: FilteringBoundLogger, stdout: socket, stderr: socket, requests: socket, logs: socket
@@ -552,7 +556,7 @@ class TriggerRunner:
     events: deque[tuple[int, events.TriggerEvent]]
 
     # Outbound queue of failed triggers
-    failed_triggers: deque[tuple[int, BaseException]]
+    failed_triggers: deque[tuple[int, BaseException | None]]
 
     # Should-we-stop flag
     # TODO: set this in a sig-int handler
@@ -600,7 +604,8 @@ class TriggerRunner:
                 # Run core logic
                 await self.create_triggers()
                 await self.cancel_triggers()
-                await self.cleanup_finished_triggers()
+                finished_ids = await self.cleanup_finished_triggers()
+                await self.sync_state_to_supervisor(finished_ids)
                 # Sleep for a bit
                 await asyncio.sleep(1)
                 # Every minute, log status
@@ -622,7 +627,7 @@ class TriggerRunner:
         """
         Read the triggers to run on stdin.
 
-        This reads-and-decodes the JSON lines send by the TriggerRunnerMonitor to us on our stdint
+        This reads-and-decodes the JSON lines send by the TriggerRunnerSupervisor to us on our stdint
         """
         loop = asyncio.get_event_loop()
 
@@ -689,7 +694,8 @@ class TriggerRunner:
             await asyncio.sleep(0)
 
             try:
-                trigger_instance = trigger_class(**workload.kwargs)
+                kwargs = Trigger._decrypt_kwargs(workload.encrypted_kwargs)
+                trigger_instance = trigger_class(**kwargs)
             except TypeError as err:
                 self.log.error("Trigger failed to inflate", error=err)
                 self.failed_triggers.append((trigger_id, err))
@@ -697,6 +703,7 @@ class TriggerRunner:
             trigger_instance.trigger_id = trigger_id
             trigger_instance.triggerer_job_id = self.job_id
             trigger_instance.task_instance = ti = workload.ti
+            trigger_instance.timeout_after = workload.timeout_after
 
             trigger_name = (
                 f"{ti.dag_id}/{ti.run_id}/{ti.task_id}/{ti.map_index}/{ti.try_number} (ID {trigger_id})"
@@ -724,7 +731,7 @@ class TriggerRunner:
                 self.triggers[trigger_id]["task"].cancel()
             await asyncio.sleep(0)
 
-    async def cleanup_finished_triggers(self):
+    async def cleanup_finished_triggers(self) -> list[int]:
         """
         Go through all trigger tasks (coroutines) and clean up entries for ones that have exited.
 
@@ -746,13 +753,17 @@ class TriggerRunner:
                     continue
                 except BaseException as e:
                     # This is potentially bad, so log it.
-                    self.log.exception("Trigger %s exited with error %s", details["name"], e)
+                    self.log.exception(
+                        "Trigger %s exited with error %s", details["name"], e, trigger_id=trigger_id
+                    )
                     saved_exc = e
                 else:
                     # See if they foolishly returned a TriggerEvent
                     if isinstance(result, events.TriggerEvent):
                         self.log.error(
-                            "Trigger returned a TriggerEvent rather than yielding it", trigger=details["name"]
+                            "Trigger returned a TriggerEvent rather than yielding it",
+                            trigger=details["name"],
+                            trigger_id=trigger_id,
                         )
                 # See if this exited without sending an event, in which case
                 # any task instances depending on it need to be failed
@@ -760,11 +771,15 @@ class TriggerRunner:
                     self.log.error(
                         "Trigger exited without sending an event. Dependent tasks will be failed.",
                         name=details["name"],
+                        trigger_id=trigger_id,
                     )
+                    # TODO: better formatting of the exception?
                     self.failed_triggers.append((trigger_id, saved_exc))
                 del self.triggers[trigger_id]
             await asyncio.sleep(0)
+        return finished_ids
 
+    async def sync_state_to_supervisor(self, finished_ids: list[int]):
         # Copy out of our deques in threadsafe manner to sync state with parent
         events_to_send = []
         while self.events:
@@ -773,8 +788,9 @@ class TriggerRunner:
 
         failures_to_send = []
         while self.failed_triggers:
-            data = self.failed_triggers.popleft()
-            failures_to_send.append(data)
+            id, exc = self.failed_triggers.popleft()
+            tb = format_exception(type(exc), exc, exc.__traceback__) if exc else None
+            failures_to_send.append((id, tb))
 
         msg = messages.TriggerStateChanges(
             events=events_to_send, finished=finished_ids, failures=failures_to_send
@@ -835,7 +851,9 @@ class TriggerRunner:
                 self.triggers[trigger_id]["events"] += 1
                 self.events.append((trigger_id, event))
         except asyncio.CancelledError:
-            if timeout := trigger.task_instance and trigger.task_instance.trigger_timeout:
+            # We get cancelled by the scheduler changing the task state. But if we do lets give a nice error
+            # message about it
+            if timeout := trigger.timeout_after:
                 timeout = timeout.replace(tzinfo=timezone.utc) if not timeout.tzinfo else timeout
                 if timeout < timezone.utcnow():
                     await self.log.aerror("Trigger cancelled due to timeout")

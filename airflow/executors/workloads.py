@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Union
+from typing import TYPE_CHECKING, Annotated, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -125,7 +126,10 @@ class RunTrigger(BaseModel):
     Consumers of this Workload must perform their own validation of this input.
     """
 
-    kwargs: dict[str, Any]
+    encrypted_kwargs: str
+
+    timeout_after: datetime | None = None
+
     kind: Literal["RunTrigger"] = Field(init=False, default="RunTrigger")
 
 
