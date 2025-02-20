@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Callable
 
 import sqlalchemy_jsonfield
 import uuid6
-from sqlalchemy import Column, ForeignKey, Index, Integer, String
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, select
 from sqlalchemy_utils import UUIDType
 
 from airflow.models.base import Base, StringID
@@ -117,6 +117,7 @@ class DeadlineTrigger:
     """
 
     DAGRUN_LOGICAL_DATE = "dagrun_logical_date"
+    DAGRUN_QUEUED_AT = "dagrun_queued_at"
 
     def __init__(self, trigger):
         self.trigger = trigger
@@ -124,17 +125,19 @@ class DeadlineTrigger:
     def evaluate_with(self, **kwargs):
         return eval(f"self.{self.trigger}")(**kwargs)
 
-    @staticmethod
-    def get_from_db(table_name, column_name):
-        # TODO:
-        #   fetch appropriate timestamp from db
-        #   cast to datetime
-        #   return
-        log.info("MOCKED Getting %s :: %s", table_name, column_name)
-        return datetime(2024, 1, 1)
+    # TODO:  Can these be abstracted into a "fetch_from_db" method as initially planned?
+    @provide_session
+    def dagrun_logical_date(self, session, dag_id: str) -> datetime:
+        # logical_date used to be called execution_date, it is the actual start time.
+        from airflow.models import DagRun
 
-    def dagrun_logical_date(self) -> datetime:
-        return self.get_from_db("dagrun", "logical_date")
+        return session.scalar(select(DagRun.logical_date).where(DagRun.dag_id == dag_id))
+
+    @provide_session
+    def dagrun_queued_at(self, session, dag_id: str) -> datetime:
+        from airflow.models import DagRun
+
+        return session.scalar(select(DagRun.queued_at).where(DagRun.dag_id == dag_id))
 
 
 class DeadlineAlert(LoggingMixin):
