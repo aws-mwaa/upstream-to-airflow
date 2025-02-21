@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from airflow.configuration import conf
+from airflow.providers.microsoft.azure.version_compat import AIRFLOW_V_3_0_PLUS
 from airflow.utils.log.file_task_handler import FileTaskHandler
 from airflow.utils.log.logging_mixin import LoggingMixin
 from azure.core.exceptions import HttpResponseError
@@ -136,9 +137,13 @@ class WasbTaskHandler(FileTaskHandler, LoggingMixin):
 
         if blob_names:
             uris = [f"https://{self.wasb_container}.blob.core.windows.net/{b}" for b in blob_names]
-            messages.extend(["Found remote logs:", *[f"  * {x}" for x in sorted(uris)]])
+            if AIRFLOW_V_3_0_PLUS:
+                messages = uris
+            else:
+                messages.extend(["Found remote logs:", *[f"  * {x}" for x in sorted(uris)]])
         else:
-            messages.append(f"No logs found in WASB; ti=%s {ti}")
+            if not AIRFLOW_V_3_0_PLUS:
+                messages.append(f"No logs found in WASB; ti=%s {ti}")
 
         for name in sorted(blob_names):
             remote_log = ""
