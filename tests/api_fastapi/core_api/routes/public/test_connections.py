@@ -26,7 +26,7 @@ from airflow.secrets.environment_variables import CONN_ENV_PREFIX
 from airflow.utils.session import provide_session
 
 from tests_common.test_utils.db import clear_db_connections
-from tests_common.test_utils.www import _check_last_log
+from tests_common.test_utils.logs import check_last_log
 
 pytestmark = pytest.mark.db_test
 
@@ -101,7 +101,7 @@ class TestDeleteConnection(TestConnectionEndpoint):
         assert response.status_code == 204
         connection = session.query(Connection).all()
         assert len(connection) == 0
-        _check_last_log(session, dag_id=None, event="delete_connection", logical_date=None)
+        check_last_log(session, dag_id=None, event="delete_connection", logical_date=None)
 
     def test_delete_should_respond_404(self, test_client):
         response = test_client.delete(f"/public/connections/{TEST_CONN_ID}")
@@ -210,7 +210,7 @@ class TestPostConnection(TestConnectionEndpoint):
         assert response.status_code == 201
         connection = session.query(Connection).all()
         assert len(connection) == 1
-        _check_last_log(session, dag_id=None, event="post_connection", logical_date=None)
+        check_last_log(session, dag_id=None, event="post_connection", logical_date=None)
 
     @pytest.mark.parametrize(
         "body",
@@ -310,7 +310,7 @@ class TestPostConnection(TestConnectionEndpoint):
         response = test_client.post("/public/connections", json=body)
         assert response.status_code == 201
         assert response.json() == expected_response
-        _check_last_log(session, dag_id=None, event="post_connection", logical_date=None, check_masked=True)
+        check_last_log(session, dag_id=None, event="post_connection", logical_date=None, check_masked=True)
 
 
 class TestPatchConnection(TestConnectionEndpoint):
@@ -582,7 +582,7 @@ class TestPatchConnection(TestConnectionEndpoint):
         response = test_client.patch(f"/public/connections/{TEST_CONN_ID}", json=body)
         assert response.status_code == 200
         assert response.json() == expected_response
-        _check_last_log(session, dag_id=None, event="post_connection", logical_date=None, check_masked=True)
+        check_last_log(session, dag_id=None, event="post_connection", logical_date=None, check_masked=True)
 
 
 class TestConnection(TestConnectionEndpoint):
@@ -635,7 +635,7 @@ class TestCreateDefaultConnections(TestConnectionEndpoint):
         response = test_client.post("/public/connections/defaults")
         assert response.status_code == 204
         assert response.content == b""
-        _check_last_log(session, dag_id=None, event="create_default_connections", logical_date=None)
+        check_last_log(session, dag_id=None, event="create_default_connections", logical_date=None)
 
     @mock.patch("airflow.api_fastapi.core_api.routes.public.connections.db_create_default_connections")
     def test_should_call_db_create_default_connections(self, mock_db_create_default_connections, test_client):
@@ -942,4 +942,4 @@ class TestBulkConnections(TestConnectionEndpoint):
         response_data = response.json()
         for connection_id, value in expected_results.items():
             assert response_data[connection_id] == value
-        _check_last_log(session, dag_id=None, event="bulk_connections", logical_date=None)
+        check_last_log(session, dag_id=None, event="bulk_connections", logical_date=None)
