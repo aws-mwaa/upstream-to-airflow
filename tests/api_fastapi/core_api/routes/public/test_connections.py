@@ -25,7 +25,7 @@ from airflow.models import Connection
 from airflow.secrets.environment_variables import CONN_ENV_PREFIX
 from airflow.utils.session import provide_session
 
-from tests_common.test_utils.db import clear_db_connections
+from tests_common.test_utils.db import clear_db_connections, clear_db_logs
 from tests_common.test_utils.logs import check_last_log
 
 pytestmark = pytest.mark.db_test
@@ -81,6 +81,7 @@ class TestConnectionEndpoint:
     @pytest.fixture(autouse=True)
     def setup(self) -> None:
         clear_db_connections(False)
+        clear_db_logs()
 
     def teardown_method(self) -> None:
         clear_db_connections()
@@ -582,7 +583,7 @@ class TestPatchConnection(TestConnectionEndpoint):
         response = test_client.patch(f"/public/connections/{TEST_CONN_ID}", json=body)
         assert response.status_code == 200
         assert response.json() == expected_response
-        check_last_log(session, dag_id=None, event="post_connection", logical_date=None, check_masked=True)
+        check_last_log(session, dag_id=None, event="patch_connection", logical_date=None, check_masked=True)
 
 
 class TestConnection(TestConnectionEndpoint):

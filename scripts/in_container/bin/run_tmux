@@ -60,11 +60,11 @@ tmux select-pane -t 1
 tmux set-option -p @airflow_component Scheduler
 tmux send-keys 'airflow scheduler' C-m
 
-tmux split-window -h
-tmux select-pane -t 2
-tmux set-option -p @airflow_component FastAPI
-
 if [[ ! ${USE_AIRFLOW_VERSION=} =~ ^2\..*  ]]; then
+  tmux split-window -h
+  tmux select-pane -t 2
+  tmux set-option -p @airflow_component FastAPI
+
     if [[ ${DEV_MODE=} == "true" ]]; then
         tmux send-keys 'airflow fastapi-api -d' C-m
     else

@@ -626,12 +626,12 @@ export type DAGRunResponse = {
   last_scheduling_decision: string | null;
   run_type: DagRunType;
   state: DagRunState;
-  external_trigger: boolean;
   triggered_by: DagRunTriggeredByType;
   conf: {
     [key: string]: unknown;
   };
   note: string | null;
+  dag_versions: Array<DagVersionResponse>;
 };
 
 /**

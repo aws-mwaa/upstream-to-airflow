@@ -117,7 +117,7 @@ class TestDagRunOperator:
             task.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
 
             dagrun = dag_maker.session.query(DagRun).filter(DagRun.dag_id == TRIGGERED_DAG_ID).one()
-            assert dagrun.external_trigger
+            assert dagrun.run_type == DagRunType.MANUAL
             actual_run_id = dagrun.run_id.rsplit("_", 1)[0]
 
             expected_run_id = DagRun.generate_run_id(
@@ -165,7 +165,7 @@ class TestDagRunOperator:
 
         with create_session() as session:
             dagrun = session.query(DagRun).filter(DagRun.dag_id == TRIGGERED_DAG_ID).one()
-            assert dagrun.external_trigger
+            assert dagrun.run_type == DagRunType.MANUAL
             assert dagrun.logical_date == custom_logical_date
             assert dagrun.run_id == DagRun.generate_run_id(
                 run_type=DagRunType.MANUAL, logical_date=custom_logical_date, run_after=custom_logical_date
@@ -207,7 +207,7 @@ class TestDagRunOperator:
         dagruns = dag_maker.session.query(DagRun).filter(DagRun.dag_id == TRIGGERED_DAG_ID).all()
         assert len(dagruns) == 1
         triggered_dag_run = dagruns[0]
-        assert triggered_dag_run.external_trigger
+        assert triggered_dag_run.run_type == DagRunType.MANUAL
         assert triggered_dag_run.logical_date == utc_now
         self.assert_extra_link(triggered_dag_run, task, dag_maker.session)
 
@@ -247,7 +247,6 @@ class TestDagRunOperator:
         dagruns = dag_maker.session.query(DagRun).filter(DagRun.dag_id == TRIGGERED_DAG_ID).all()
         assert len(dagruns) == 1
         triggered_dag_run = dagruns[0]
-        assert triggered_dag_run.external_trigger
         assert triggered_dag_run.logical_date == utc_now
         self.assert_extra_link(triggered_dag_run, task, dag_maker.session)
 
@@ -270,7 +269,7 @@ class TestDagRunOperator:
             dagruns = session.query(DagRun).filter(DagRun.dag_id == TRIGGERED_DAG_ID).all()
             assert len(dagruns) == 1
             triggered_dag_run = dagruns[0]
-            assert triggered_dag_run.external_trigger
+            assert triggered_dag_run.run_type == DagRunType.MANUAL
             assert triggered_dag_run.logical_date == DEFAULT_DATE
             self.assert_extra_link(triggered_dag_run, task, session)
 
@@ -292,7 +291,7 @@ class TestDagRunOperator:
             dagruns = session.query(DagRun).filter(DagRun.dag_id == TRIGGERED_DAG_ID).all()
             assert len(dagruns) == 1
             triggered_dag_run = dagruns[0]
-            assert triggered_dag_run.external_trigger
+            assert triggered_dag_run.run_type == DagRunType.MANUAL
             assert triggered_dag_run.dag_id == TRIGGERED_DAG_ID
             self.assert_extra_link(triggered_dag_run, task, session)
 
@@ -460,7 +459,7 @@ class TestDagRunOperator:
         with create_session() as session:
             dag_runs = session.query(DagRun).filter(DagRun.dag_id == TRIGGERED_DAG_ID).all()
             assert len(dag_runs) == expected_dagruns_count
-            assert dag_runs[0].external_trigger
+            assert dag_runs[0].run_type == DagRunType.MANUAL
 
     def test_trigger_dagrun_with_wait_for_completion_true(self, dag_maker):
         """Test TriggerDagRunOperator with wait_for_completion."""
