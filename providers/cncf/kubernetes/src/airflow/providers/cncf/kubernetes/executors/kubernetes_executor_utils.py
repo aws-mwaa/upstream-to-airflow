@@ -402,6 +402,7 @@ class AirflowKubernetesScheduler(LoggingMixin):
                     "python",
                     "-m",
                     "airflow.sdk.execution_time.execute_workload",
+                    "--json-file",
                     "/tmp/execute/input.json",
                 ]
             else:
