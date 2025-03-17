@@ -35,8 +35,8 @@ import structlog
 log = structlog.get_logger(logger_name=__name__)
 
 
-def execute_workload(input: str) -> None:
-    from pydantic import TypeAdapter
+def execute_workload(workload) -> None:
+    # from pydantic import TypeAdapter
 
     from airflow.configuration import conf
     from airflow.executors import workloads
@@ -45,13 +45,13 @@ def execute_workload(input: str) -> None:
 
     configure_logging(output=sys.stdout.buffer)
 
-    decoder = TypeAdapter[workloads.All](workloads.All)
-    workload = decoder.validate_json(input)
+    # decoder = TypeAdapter[workloads.All](workloads.All)
+    # workload = decoder.validate_json(input)
 
     if not isinstance(workload, workloads.ExecuteTask):
-        raise ValueError(f"KubernetesExecutor does not know how to handle {type(workload)}")
+        raise ValueError(f"Executor does not know how to handle {type(workload)}")
 
-    log.info("Executing workload in Kubernetes", workload=workload)
+    log.info("Executing workload", workload=workload)
 
     supervise(
         # This is the "wrong" ti type, but it duck types the same. TODO: Create a protocol for this.
@@ -68,16 +68,33 @@ def main():
     parser = argparse.ArgumentParser(
         description="Execute a workload in a Containerised executor using the task SDK."
     )
+
     parser.add_argument(
-        "input_file", help="Path to the input JSON file containing the execution workload payload."
+        "input_json",
+        help="Path to the input JSON file containing the execution workload payload or the json string itself.",
     )
 
     args = parser.parse_args()
 
-    with open(args.input_file) as file:
-        input_data = file.read()
+    from pydantic import TypeAdapter
+    from airflow.executors import workloads
+    decoder = TypeAdapter[workloads.All](workloads.All)
+    try:
+        with open(args.input_json) as file:
+            input_data = file.read()
+            workload = decoder.validate_json(input_data)
+    except Exception as file_open_e:
+        # We couldn't find that file, so let's assume it's a JSON string.
+        try:
+            workload = decoder.validate_json(args.input_json)
+        except Exception as e:
+            # At this point catch any exception and log
+            log.error("Failed to parse input JSON as path", error=str(file_open_e))
+            log.error("Failed to parse input JSON as string", error=str(e))
+            log.error("input was neither valid json nor a path to a file containing valid input json")
+            sys.exit(1)
 
-    execute_workload(input_data)
+    execute_workload(workload)
 
 
 if __name__ == "__main__":
