@@ -29,6 +29,7 @@ from collections.abc import Collection, Generator, Iterable, Sequence
 from contextlib import ExitStack
 from datetime import datetime, timedelta
 from functools import cache
+from pathlib import Path
 from re import Pattern
 from typing import (
     TYPE_CHECKING,
@@ -76,6 +77,7 @@ from airflow.exceptions import (
     UnknownExecutorException,
 )
 from airflow.executors.executor_loader import ExecutorLoader
+from airflow.executors.workloads import BundleInfo
 from airflow.models.asset import (
     AssetDagRunQueue,
     AssetModel,
@@ -234,10 +236,10 @@ def get_asset_triggered_next_run_info(
     }
 
 
-def _triggerer_is_healthy():
+def _triggerer_is_healthy(session):
     from airflow.jobs.triggerer_job_runner import TriggererJobRunner
 
-    job = TriggererJobRunner.most_recent_job()
+    job = TriggererJobRunner.most_recent_job(session=session)
     return job and job.is_alive()
 
 
@@ -1713,7 +1715,7 @@ class DAG(TaskSDKDag, LoggingMixin):
                     self.log.warning("No tasks to run. unrunnable tasks: %s", ids_unrunnable)
                     time.sleep(1)
 
-                triggerer_running = _triggerer_is_healthy()
+                triggerer_running = _triggerer_is_healthy(session)
                 for ti in scheduled_tis:
                     ti.task = tasks[ti.task_id]
 
@@ -1726,8 +1728,28 @@ class DAG(TaskSDKDag, LoggingMixin):
                     if use_executor:
                         if executor.has_task(ti):
                             continue
-                        # Send the task to the executor
-                        executor.queue_task_instance(ti, ignore_ti_state=True)
+                        # TODO: Task-SDK: This check is transitionary. Remove once all executors are ported over.
+                        # Has a real queue_activity implemented
+                        from airflow.executors import workloads
+                        from airflow.executors.base_executor import BaseExecutor
+
+                        if executor.queue_workload.__func__ is not BaseExecutor.queue_workload:  # type: ignore[attr-defined]
+                            # TODO: dag_model is this basically, maybe set that on the ti here and everything
+                            # will work like magic?
+                            workload = workloads.ExecuteTask.make(
+                                ti,
+                                # dag_rel_path=Path(self.fileloc).relative_to(settings.DAGS_FOLDER),
+                                dag_rel_path=Path(self.fileloc),
+                                generator=executor.jwt_generator,
+                                # TODO: Get this from config, but I'm hardcoding the default for now
+                                bundle_info=BundleInfo(name="dags-folder"),
+                            )
+                            executor.queue_workload(workload, session=session)
+                            ti.state = TaskInstanceState.QUEUED
+                            session.commit()
+                        else:
+                            # Send the task to the executor
+                            executor.queue_task_instance(ti, ignore_ti_state=True)
                     else:
                         # Run the task locally
                         try:

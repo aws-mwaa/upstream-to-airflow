@@ -55,6 +55,8 @@ def execute_workload(workload) -> None:
         raise ValueError(f"We do not know how to handle {type(workload)}")
 
     log.info("Executing workload", workload=workload)
+    server = conf.get("core", "execution_api_server_url")
+    log.info("Using server", server=server)
 
     supervise(
         # This is the "wrong" ti type, but it duck types the same. TODO: Create a protocol for this.
@@ -62,7 +64,7 @@ def execute_workload(workload) -> None:
         dag_rel_path=workload.dag_rel_path,
         bundle_info=workload.bundle_info,
         token=workload.token,
-        server=conf.get("core", "execution_api_server_url"),
+        server=server,
         log_path=workload.log_path,
         # Include the output of the task to stdout too, so that in process logs can be read from via the
         # kubeapi as pod logs.
