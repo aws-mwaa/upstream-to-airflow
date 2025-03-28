@@ -35,8 +35,8 @@ import structlog
 log = structlog.get_logger(logger_name=__name__)
 
 
-def execute_workload(workload) -> None:
-    # from pydantic import TypeAdapter
+def execute_workload(input: str) -> None:
+    from pydantic import TypeAdapter
 
     from airflow.configuration import conf
     from airflow.executors import workloads
@@ -48,8 +48,8 @@ def execute_workload(workload) -> None:
 
     configure_logging(output=sys.stdout.buffer, enable_pretty_log=False)
 
-    # decoder = TypeAdapter[workloads.All](workloads.All)
-    # workload = decoder.validate_json(input)
+    decoder = TypeAdapter[workloads.All](workloads.All)
+    workload = decoder.validate_json(input)
 
     if not isinstance(workload, workloads.ExecuteTask):
         raise ValueError(f"We do not know how to handle {type(workload)}")
@@ -76,35 +76,16 @@ def main():
     parser = argparse.ArgumentParser(
         description="Execute a workload in a Containerised executor using the task SDK."
     )
-
     parser.add_argument(
-        "input_json",
-        help="Path to the input JSON file containing the execution workload payload or the json string itself.",
+        "input_file", help="Path to the input JSON file containing the execution workload payload."
     )
 
     args = parser.parse_args()
 
-    from pydantic import TypeAdapter
+    with open(args.input_file) as file:
+        input_data = file.read()
 
-    from airflow.executors import workloads
-
-    decoder = TypeAdapter[workloads.All](workloads.All)
-    try:
-        with open(args.input_json) as file:
-            input_data = file.read()
-            workload = decoder.validate_json(input_data)
-    except Exception as file_open_e:
-        # We couldn't find that file, so let's assume it's a JSON string.
-        try:
-            workload = decoder.validate_json(args.input_json)
-        except Exception as e:
-            # At this point catch any exception and log
-            log.error("Failed to parse input JSON as path", error=str(file_open_e))
-            log.error("Failed to parse input JSON as string", error=str(e))
-            log.error("input was neither valid json nor a path to a file containing valid input json")
-            sys.exit(1)
-
-    execute_workload(workload)
+    execute_workload(input_data)
 
 
 if __name__ == "__main__":

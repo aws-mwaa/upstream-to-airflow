@@ -16,8 +16,7 @@
 # under the License.
 
 # hadolint ignore=DL3007
-#FROM apache/airflow:latest
-FROM ghcr.io/apache/airflow/main/ci/python3.9:latest
+FROM apache/airflow:latest
 USER root
 RUN apt-get update \
   && apt-get install -y --no-install-recommends unzip \
@@ -37,26 +36,15 @@ RUN curl "https://raw.githubusercontent.com/apache/airflow/main/scripts/docker/e
 COPY <<"EOF" /install_dags_entrypoint.sh
 #!/bin/bash
 
-set -e
+echo "Downloading DAGs from S3 bucket"
+aws s3 sync "$S3_URI" "$CONTAINER_DAG_PATH"
 
-# Sync DAGs from S3 (if applicable)
-if [[ -n "$S3_URI" ]]; then
-    echo "Downloading DAGs from S3 bucket: $S3_URI"
-    aws s3 sync "$S3_URI" "$CONTAINER_DAG_PATH"
-fi
-
-# If no arguments are passed, start the default Airflow entrypoint
-if [[ $# -eq 0 ]]; then
-    exec /home/airflow/entrypoint.sh
-else
-    # Execute any arbitrary command
-    exec "$@"
-fi
+/home/airflow/entrypoint.sh "$@"
 EOF
 
 RUN chmod +x /install_dags_entrypoint.sh
 
-#USER airflow
+USER airflow
 
 ## Installing Python Dependencies
 # Python dependencies can be installed by providing a requirements.txt.
@@ -113,7 +101,7 @@ ENV CONTAINER_DAG_PATH=$container_dag_path
 ARG s3_uri
 ENV S3_URI=$s3_uri
 # If using S3 bucket as source of DAGs, uncommenting the next ENTRYPOINT command will overwrite this one.
-ENTRYPOINT ["/usr/bin/dumb-init", "--", "/entrypoint"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/home/airflow/entrypoint.sh"]
 
 # Uncomment the line if using S3 bucket as the source of DAGs
-ENTRYPOINT ["/usr/bin/dumb-init", "--", "/install_dags_entrypoint.sh"]
+# ENTRYPOINT ["/usr/bin/dumb-init", "--", "/install_dags_entrypoint.sh"]
