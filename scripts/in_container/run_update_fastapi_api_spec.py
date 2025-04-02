@@ -16,6 +16,7 @@
 # under the License.
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -70,6 +71,10 @@ def generate_file(app: FastAPI, file_path: Path, prefix: str = ""):
 
 
 # Generate main application openapi spec
+# Set the auth manager as SAM. No need to use another one to generate fastapi spec
+os.environ["AIRFLOW__CORE__AUTH_MANAGER"] = (
+    "airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager"
+)
 generate_file(app=create_app(), file_path=OPENAPI_SPEC_FILE)
 
 # Generate simple auth manager openapi spec

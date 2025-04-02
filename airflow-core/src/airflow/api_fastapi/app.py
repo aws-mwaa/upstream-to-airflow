@@ -49,6 +49,7 @@ API_ROOT_PATH = urlsplit(API_BASE_URL).path
 
 # Define the full path on which the potential auth manager fastapi is mounted
 AUTH_MANAGER_FASTAPI_APP_PREFIX = f"{API_ROOT_PATH}auth"
+AUTH_MANAGER_FASTAPI_APP_BASE_URL = f"{API_BASE_URL}auth"
 
 log = logging.getLogger(__name__)
 
