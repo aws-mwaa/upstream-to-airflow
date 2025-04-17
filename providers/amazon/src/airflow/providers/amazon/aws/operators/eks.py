@@ -1068,7 +1068,12 @@ class EksPodOperator(KubernetesPodOperator):
             aws_conn_id=self.aws_conn_id,
             region_name=self.region,
         )
+        self.log.info('STARTING CONFIG BUSINESS')
         with eks_hook.generate_config_file(
             eks_cluster_name=self.cluster_name, pod_namespace=self.namespace
         ) as self.config_file:
+            self.log.info("Using config file: %s", self.config_file)
+            # log the contents of the config file:
+            with open(self.config_file, "r") as f:
+                self.log.info("Config file contents: %s", f.read())
             return super().execute(context)

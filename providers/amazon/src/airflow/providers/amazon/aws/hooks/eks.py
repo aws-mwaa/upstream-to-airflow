@@ -603,6 +603,8 @@ class EksHook(AwsBaseHook):
         }
         config_text = yaml.dump(cluster_config, default_flow_style=False)
 
+        self.log.info("Kube config file contents: %s", config_text)
+
         with tempfile.NamedTemporaryFile(mode="w") as config_file:
             config_file.write(config_text)
             config_file.flush()

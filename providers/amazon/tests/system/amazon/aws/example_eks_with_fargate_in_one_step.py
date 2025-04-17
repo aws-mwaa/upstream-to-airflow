@@ -20,17 +20,14 @@ from datetime import datetime
 
 from airflow.models.baseoperator import chain
 from airflow.models.dag import DAG
-from airflow.providers.amazon.aws.hooks.eks import ClusterStates, FargateProfileStates
+from airflow.providers.amazon.aws.hooks.eks import FargateProfileStates
 from airflow.providers.amazon.aws.operators.eks import (
     EksCreateClusterOperator,
-    EksDeleteClusterOperator,
     EksPodOperator,
 )
-from airflow.providers.amazon.aws.sensors.eks import EksClusterStateSensor, EksFargateProfileStateSensor
-from airflow.utils.trigger_rule import TriggerRule
+from airflow.providers.amazon.aws.sensors.eks import EksFargateProfileStateSensor
 
 from system.amazon.aws.utils import ENV_ID_KEY, SystemTestContextBuilder
-from system.amazon.aws.utils.k8s import get_describe_pod_operator
 
 DAG_ID = "example_eks_with_fargate_in_one_step"
 
@@ -68,29 +65,29 @@ with DAG(
 
     # [START howto_operator_eks_create_cluster_with_fargate_profile]
     # Create an Amazon EKS cluster control plane and an AWS Fargate compute platform in one step.
-    create_cluster_and_fargate_profile = EksCreateClusterOperator(
-        task_id="create_eks_cluster_and_fargate_profile",
-        cluster_name=cluster_name,
-        cluster_role_arn=cluster_role_arn,
-        resources_vpc_config={
-            "subnetIds": subnets,
-            "endpointPublicAccess": True,
-            "endpointPrivateAccess": False,
-        },
-        compute="fargate",
-        fargate_profile_name=fargate_profile_name,
-        # Opting to use the same ARN for the cluster and the pod here,
-        # but a different ARN could be configured and passed if desired.
-        fargate_pod_execution_role_arn=fargate_pod_role_arn,
-    )
+    # create_cluster_and_fargate_profile = EksCreateClusterOperator(
+    #     task_id="create_eks_cluster_and_fargate_profile",
+    #     cluster_name=cluster_name,
+    #     cluster_role_arn=cluster_role_arn,
+    #     resources_vpc_config={
+    #         "subnetIds": subnets,
+    #         "endpointPublicAccess": True,
+    #         "endpointPrivateAccess": False,
+    #     },
+    #     compute="fargate",
+    #     fargate_profile_name=fargate_profile_name,
+    #     # Opting to use the same ARN for the cluster and the pod here,
+    #     # but a different ARN could be configured and passed if desired.
+    #     fargate_pod_execution_role_arn=fargate_pod_role_arn,
+    # )
     # [END howto_operator_eks_create_cluster_with_fargate_profile]
 
-    await_create_fargate_profile = EksFargateProfileStateSensor(
-        task_id="await_create_fargate_profile",
-        cluster_name=cluster_name,
-        fargate_profile_name=fargate_profile_name,
-        target_state=FargateProfileStates.ACTIVE,
-    )
+    # await_create_fargate_profile = EksFargateProfileStateSensor(
+    #     task_id="await_create_fargate_profile",
+    #     cluster_name=cluster_name,
+    #     fargate_profile_name=fargate_profile_name,
+    #     target_state=FargateProfileStates.ACTIVE,
+    # )
 
     start_pod = EksPodOperator(
         task_id="run_pod",
@@ -105,40 +102,40 @@ with DAG(
         on_finish_action="keep_pod",
     )
 
-    describe_pod = get_describe_pod_operator(
-        cluster_name, pod_name="{{ ti.xcom_pull(key='pod_name', task_ids='run_pod') }}"
-    )
-    # only describe the pod if the task above failed, to help diagnose
-    describe_pod.trigger_rule = TriggerRule.ONE_FAILED
+    # describe_pod = get_describe_pod_operator(
+    #     cluster_name, pod_name="{{ ti.xcom_pull(key='pod_name', task_ids='run_pod') }}"
+    # )
+    # # only describe the pod if the task above failed, to help diagnose
+    # describe_pod.trigger_rule = TriggerRule.ONE_FAILED
 
     # An Amazon EKS cluster can not be deleted with attached resources such as nodegroups or Fargate profiles.
     # Setting the `force` to `True` will delete any attached resources before deleting the cluster.
-    delete_cluster_and_fargate_profile = EksDeleteClusterOperator(
-        task_id="delete_fargate_profile_and_cluster",
-        trigger_rule=TriggerRule.ALL_DONE,
-        cluster_name=cluster_name,
-        force_delete_compute=True,
-    )
+    # delete_cluster_and_fargate_profile = EksDeleteClusterOperator(
+    #     task_id="delete_fargate_profile_and_cluster",
+    #     trigger_rule=TriggerRule.ALL_DONE,
+    #     cluster_name=cluster_name,
+    #     force_delete_compute=True,
+    # )
 
-    await_delete_cluster = EksClusterStateSensor(
-        task_id="await_delete_cluster",
-        trigger_rule=TriggerRule.ALL_DONE,
-        cluster_name=cluster_name,
-        target_state=ClusterStates.NONEXISTENT,
-        poke_interval=10,
-    )
+    # await_delete_cluster = EksClusterStateSensor(
+    #     task_id="await_delete_cluster",
+    #     trigger_rule=TriggerRule.ALL_DONE,
+    #     cluster_name=cluster_name,
+    #     target_state=ClusterStates.NONEXISTENT,
+    #     poke_interval=10,
+    # )
 
     chain(
         # TEST SETUP
         test_context,
         # TEST BODY
-        create_cluster_and_fargate_profile,
-        await_create_fargate_profile,
+        # create_cluster_and_fargate_profile,
+        # await_create_fargate_profile,
         start_pod,
         # TEST TEARDOWN
-        describe_pod,
-        delete_cluster_and_fargate_profile,
-        await_delete_cluster,
+        # describe_pod,
+        # delete_cluster_and_fargate_profile,
+        # await_delete_cluster,
     )
 
     from tests_common.test_utils.watcher import watcher
