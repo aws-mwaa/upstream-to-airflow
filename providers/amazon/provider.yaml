@@ -999,6 +999,74 @@ config:
         example: '{"Tags": [{"Key": "key", "Value": "value"}]}'
         default: ~
 
+  aws_lambda_executor:
+    description: |
+      This section only applies if you are using the AwsLambdaExecutor in
+      Airflow's ``[core.executor]`` configuration.
+      For more information on any of these execution parameters, see the link below:
+      https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/lambda/client/invoke.html
+      For boto3 credential management, see
+      https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html
+    options:
+      conn_id:
+        description: |
+          The Airflow connection (i.e. credentials) used by the Lambda executor to make API calls.
+        version_added: "9.7.0"
+        type: string
+        example: "aws_default"
+        default: "aws_default"
+      region_name:
+        description: |
+          The name of the AWS Region where Amazon Lambda is configured. Required.
+        version_added: "9.7.0"
+        type: string
+        example: "us-east-1"
+        default: ~
+      check_health_on_startup:
+        description: |
+          Whether or not to check the Lambda Executor health on startup.
+        version_added: "9.7.0"
+        type: boolean
+        example: "True"
+        default: "True"
+      max_run_task_attempts:
+        description: |
+          The maximum number of times the Lambda Executor should attempt to run a task.
+        version_added: "9.7.0"
+        type: integer
+        example: "3"
+        default: "3"
+      queue_url:
+        description: |
+          The name of the SQS queue to use for the Lambda executor. Required.
+          The Lambda executor will poll this queue for results of the lambda function.
+        version_added: "9.7.0"
+        type: string
+        example: "airflow-lambda-executor-function"
+        default: ~
+      dead_letter_queue_url:
+        description: |
+          The name of the SQS dead letter queue to use for the Lambda function.
+          The Lambda executor will poll this queue for timeout/exception results of the lambda function.
+        version_added: "9.7.0"
+        type: string
+        example: "airflow-lambda-executor-function"
+        default: ~
+      function_name:
+        description: |
+          The name of the Lambda function to invoke. Required.
+        version_added: "9.7.0"
+        type: string
+        example: "airflow-lambda-executor-function"
+        default: ~
+      qualifier:
+        description: |
+          The version or alias of the Lambda function to invoke. If not specified, the latest version is used.
+        version_added: "9.7.0"
+        type: string
+        example: "1"
+        default: ~
+
   aws_ecs_executor:
     description: |
       This section only applies if you are using the AwsEcsExecutor in
