@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.exc import NoResultFound
 
 from airflow.secrets import BaseSecretsBackend
 from airflow.utils.session import NEW_SESSION, provide_session
@@ -30,6 +31,9 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from airflow.models import Connection
+
+import logging
+log = logging.getLogger(__name__)
 
 
 class MetastoreBackend(BaseSecretsBackend):
@@ -45,6 +49,16 @@ class MetastoreBackend(BaseSecretsBackend):
         :return: Connection Object
         """
         from airflow.models import Connection
+
+        log.info("MetastoreBackend.get_connection(%s, %s)", conn_id, session)
+
+        try:
+            all_connections = session.scalar(select(Connection))
+            log.info("All connections: %s", all_connections)
+            if not all_connections:
+                return None
+        except Exception as e:
+            log.warning(e, exc_info=True)
 
         conn = session.scalar(select(Connection).where(Connection.conn_id == conn_id).limit(1))
         session.expunge_all()

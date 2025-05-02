@@ -16,6 +16,7 @@
 # under the License.
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from airflow.decorators import task
@@ -63,11 +64,13 @@ SAMPLE_DATA = r"""1,Caipirinha,Cachaca
 3,Daiquiri,Rum
 """
 
+log = logging.getLogger(__name__)
+
 
 @task
 def create_connection(conn_id_name: str, cluster_id: str):
     cluster_endpoint = RedshiftHook().conn.describe_clusters(ClusterIdentifier=cluster_id)["Clusters"][0]
-    make_authenticated_rest_api_request(
+    response = make_authenticated_rest_api_request(
         path="/api/v2/connections",
         method="POST",
         body={
@@ -80,7 +83,8 @@ def create_connection(conn_id_name: str, cluster_id: str):
             "password": DB_PASS,
         },
     )
-
+    log.info(make_authenticated_rest_api_request("/api/v2/connections", method="GET"))
+    return response
 
 with DAG(
     dag_id=DAG_ID,

@@ -461,6 +461,8 @@ class Connection(Base, LoggingMixin):
         # means SQLA etc is loaded, but we can't avoid that unless/until we add import shims as a big
         # back-compat layer
 
+        log.info("Getting connection: %s", conn_id)
+
         # If this is set it means are in some kind of execution context (Task, Dag Parse or Triggerer perhaps)
         # and should use the Task SDK API server path
         if hasattr(sys.modules.get("airflow.sdk.execution_time.task_runner"), "SUPERVISOR_COMMS"):
@@ -468,8 +470,11 @@ class Connection(Base, LoggingMixin):
             from airflow.sdk import Connection as TaskSDKConnection
             from airflow.sdk.exceptions import AirflowRuntimeError, ErrorType
 
+            log.info("Getting connection from Task SDK")
+
             try:
                 conn = TaskSDKConnection.get(conn_id=conn_id)
+                log.info("Successfully got connection from Task SDK")
                 if isinstance(conn, TaskSDKConnection):
                     if conn.password:
                         mask_secret(conn.password)
@@ -482,23 +487,29 @@ class Connection(Base, LoggingMixin):
                     raise AirflowNotFoundException(f"The conn_id `{conn_id}` isn't defined")
                 raise
 
+        log.info("Trying to get connection from SecretCache")
         # check cache first
         # enabled only if SecretCache.init() has been called first
         try:
             uri = SecretCache.get_connection_uri(conn_id)
+            log.info("Successfully got connection from SecretCache")
             return Connection(conn_id=conn_id, uri=uri)
         except SecretCache.NotPresentException:
             pass  # continue business
 
+        log.info("Trying to get connection from secrets backends")
         # iterate over backends if not in cache (or expired)
         for secrets_backend in ensure_secrets_loaded():
+            log.info("Trying to get connection from secrets backend %s", secrets_backend)
             try:
                 conn = secrets_backend.get_connection(conn_id=conn_id)
+                log.info("Found: %s", conn)
                 if conn:
+                    log.info("Successfully got connection from secrets backend %s", secrets_backend)
                     SecretCache.save_connection_uri(conn_id, conn.get_uri())
                     return conn
             except Exception:
-                log.debug(
+                log.info(
                     "Unable to retrieve connection from secrets backend (%s). "
                     "Checking subsequent secrets backend.",
                     type(secrets_backend).__name__,
