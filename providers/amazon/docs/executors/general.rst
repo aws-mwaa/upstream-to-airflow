@@ -109,6 +109,10 @@ Replace ``YOUR_ACCESS_KEY``, ``YOUR_SECRET_KEY``,
 ``YOUR_SESSION_TOKEN``, and ``YOUR_DEFAULT_REGION`` with valid AWS
 credentials.
 
+.. END DOCKERFILE_AUTH_SECOND_METHOD
+
+.. BEGIN BASE_IMAGE
+
 Base Image
 ~~~~~~~~~~
 
@@ -142,6 +146,9 @@ version <https://hub.docker.com/r/apache/airflow/tags?page=1&name=3.9>`__.
 For example, the tag ``latest-python3.9`` specifies that the image will
 have python 3.9 installed.
 
+.. END BASE_IMAGE
+
+.. BEGIN LOADING_DAGS
 
 Loading DAGs
 ~~~~~~~~~~~~
@@ -213,21 +220,19 @@ Detailed instructions on how to use the Docker image, that you have
 created via this readme, with the |executorName| Executor can be found
 :ref:`here <setup_guide>`.
 
-.. END DOCKERFILE_AUTH_SECOND_METHOD
+.. END LOADING_DAGS
 
 .. BEGIN LOGGING
 
 Logging
 -------
 
-Airflow tasks executed via this executor run in containers within
+Airflow tasks executed via this executor run within
 the configured VPC. This means that logs are not directly accessible to
-the Airflow Webserver and when containers are stopped, after task
-completion, the logs would be permanently lost.
+the Airflow Webserver, after task completion, the logs would be permanently lost.
 
 Remote logging should be employed when using the |executorName| executor to persist
-your Airflow Task logs and make them viewable from the Airflow
-Webserver.
+your Airflow Task logs and make them viewable from the Airflow Webserver.
 
 Configuring Remote Logging
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
