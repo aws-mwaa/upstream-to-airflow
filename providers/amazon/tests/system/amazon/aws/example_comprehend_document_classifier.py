@@ -114,10 +114,10 @@ def document_classifier_workflow():
 
 
 @task
-def create_kwargs_discharge():
+def create_kwargs_discharge(discharge_key: str):
     return [
         {
-            "source_bucket_key": str(test_context[BUCKET_KEY_DISCHARGE_KEY]),
+            "source_bucket_key": discharge_key,
             "dest_bucket_key": f"{TRAINING_DATA_PREFIX}/discharge-summary-{counter}.pdf",
         }
         for counter in range(10)
@@ -125,10 +125,10 @@ def create_kwargs_discharge():
 
 
 @task
-def create_kwargs_doctors_notes():
+def create_kwargs_doctors_notes(doctor_notes_key):
     return [
         {
-            "source_bucket_key": str(test_context[BUCKET_KEY_DOCTORS_NOTES]),
+            "source_bucket_key": doctor_notes_key,
             "dest_bucket_key": f"{TRAINING_DATA_PREFIX}/doctors-notes-{counter}.pdf",
         }
         for counter in range(10)
@@ -146,6 +146,8 @@ with DAG(
     env_id = test_context["ENV_ID"]
     classifier_name = f"{env_id}-custom-document-classifier"
     bucket_name = f"{env_id}-comprehend-document-classifier"
+    discharge_key = test_context[BUCKET_KEY_DISCHARGE_KEY]
+    doctor_notes_key = test_context[BUCKET_KEY_DOCTORS_NOTES]
 
     input_data_configurations = {
         "S3Uri": f"s3://{bucket_name}/{ANNOTATION_BUCKET_KEY}",
@@ -165,7 +167,7 @@ with DAG(
         bucket_name=bucket_name,
     )
 
-    discharge_kwargs = create_kwargs_discharge()
+    discharge_kwargs = create_kwargs_discharge(discharge_key)
     s3_copy_discharge_task = S3CopyObjectOperator.partial(
         task_id="s3_copy_discharge_task",
         source_bucket_name=test_context[BUCKET_NAME_KEY],
@@ -173,7 +175,7 @@ with DAG(
         meta_data_directive="REPLACE",
     ).expand_kwargs(discharge_kwargs)
 
-    doctors_notes_kwargs = create_kwargs_doctors_notes()
+    doctors_notes_kwargs = create_kwargs_doctors_notes(doctor_notes_key)
     s3_copy_doctors_notes_task = S3CopyObjectOperator.partial(
         task_id="s3_copy_doctors_notes_task",
         source_bucket_name=test_context[BUCKET_NAME_KEY],
