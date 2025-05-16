@@ -69,6 +69,7 @@ def _get_test_name() -> str:
     """
     # The exact layer of the stack will depend on if this is called directly
     # or from another helper, but the test will always contain the identifier.
+    log.info("_get_test_name() filenames: %s", [f.filename for f in inspect.stack()])
     test_filename: str = next(
         frame.filename
         for frame in inspect.stack()
