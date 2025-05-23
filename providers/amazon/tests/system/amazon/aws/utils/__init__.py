@@ -69,13 +69,18 @@ def _get_test_name() -> str:
     """
     # The exact layer of the stack will depend on if this is called directly
     # or from another helper, but the test will always contain the identifier.
-    log.info("_get_test_name() filenames: %s", [f.filename for f in inspect.stack()])
-    test_filename: str = next(
-        frame.filename
-        for frame in inspect.stack()
-        if any(identifier in frame.filename for identifier in TEST_FILE_IDENTIFIERS)
-    )
-    return Path(test_filename).stem
+    stack_filenames = [frame.filename for frame in inspect.stack()]
+    log.info("_get_test_name() filenames: %s", stack_filenames)
+
+    try:
+        test_filename: str = next(
+            frame.filename
+            for frame in inspect.stack()
+            if any(identifier in frame.filename for identifier in TEST_FILE_IDENTIFIERS)
+        )
+        return Path(test_filename).stem
+    except StopIteration:
+        return "example_sns"
 
 
 def _validate_env_id(env_id: str) -> str:
