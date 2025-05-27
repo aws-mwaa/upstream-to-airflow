@@ -74,6 +74,10 @@ def _get_test_name() -> str:
         for frame in inspect.stack()
         if any(identifier in frame.filename for identifier in TEST_FILE_IDENTIFIERS)
     )
+    stack_frames_str = []
+    for i, frame_info in enumerate(inspect.stack()):
+        stack_frames_str.append(f"{i}: {frame_info.filename}, line {frame_info.lineno}, in {frame_info.function}")
+    log.info("_get_test_name call stack:\n%s", stack_frames_str)
     return Path(test_filename).stem
 
 
