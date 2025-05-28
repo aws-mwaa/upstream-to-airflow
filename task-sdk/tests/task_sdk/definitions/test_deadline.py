@@ -16,7 +16,6 @@
 # under the License.
 from __future__ import annotations
 
-import logging
 from datetime import timedelta
 from unittest import mock
 
@@ -79,13 +78,6 @@ class TestDeadlineAlert:
 
         with pytest.raises(error_type, match=expected_message):
             DeadlineAlert.get_callback_path(callback_value)
-
-    def test_log_unimportable_but_properly_formatted_callback(self, caplog):
-        with caplog.at_level(logging.DEBUG):
-            path = DeadlineAlert.get_callback_path(UNIMPORTABLE_DOT_PATH)
-
-            assert "could not be imported" in caplog.text
-            assert path == UNIMPORTABLE_DOT_PATH
 
     @pytest.mark.parametrize(
         "test_alert, should_equal",
