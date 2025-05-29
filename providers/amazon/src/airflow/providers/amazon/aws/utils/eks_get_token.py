@@ -17,9 +17,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime, timedelta, timezone
 
-from airflow.providers.amazon.aws.hooks.eks import EksHook
 
 # Presigned STS urls are valid for 15 minutes, set token expiration to 1 minute before it expires for
 # some cushion
@@ -52,6 +52,9 @@ def get_parser():
 
 
 def main():
+    # TODO: Add a comment if this works
+    os.environ["PYTHON_OPERATORS_VIRTUAL_ENV_MODE"] = "1"
+    from airflow.providers.amazon.aws.hooks.eks import EksHook
     parser = get_parser()
     args = parser.parse_args()
     eks_hook = EksHook(aws_conn_id=args.aws_conn_id, region_name=args.region_name)
