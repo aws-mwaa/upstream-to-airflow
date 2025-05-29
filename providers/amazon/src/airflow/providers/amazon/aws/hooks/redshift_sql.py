@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     from airflow.models.connection import Connection
     from airflow.providers.openlineage.sqlparser import DatabaseInfo
 
+import logging
+logging.getLogger('redshift_connector').setLevel(logging.DEBUG)
+
 
 class RedshiftSQLHook(DbApiHook):
     """
@@ -200,6 +203,8 @@ class RedshiftSQLHook(DbApiHook):
         conn_params = self._get_conn_params()
         conn_kwargs_dejson = self.conn.extra_dejson
         conn_kwargs: dict = {**conn_params, **conn_kwargs_dejson}
+        conn_kwargs["timeout"] = 600
+        self.log.info("redshift_connector.connect conn_kwargs: %s", conn_params)
         return redshift_connector.connect(**conn_kwargs)
 
     def get_openlineage_database_info(self, connection: Connection) -> DatabaseInfo:
