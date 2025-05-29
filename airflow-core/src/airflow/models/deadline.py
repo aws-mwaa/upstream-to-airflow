@@ -31,6 +31,7 @@ from sqlalchemy_utils import UUIDType
 
 from airflow.models.base import Base, StringID
 from airflow.settings import json
+from airflow.utils.decorators import classproperty
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.session import NEW_SESSION, provide_session
 from airflow.utils.sqlalchemy import UtcDateTime
@@ -116,6 +117,10 @@ class ReferenceModels:
 
         # Set of required kwargs - subclasses should override this.
         required_kwargs: set[str] = set()
+
+        @classproperty
+        def reference_name(cls: Any) -> str:
+            return cls.__name__
 
         def evaluate_with(self, **kwargs: Any) -> datetime:
             """Validate the provided kwargs and evaluate this deadline with the given conditions."""

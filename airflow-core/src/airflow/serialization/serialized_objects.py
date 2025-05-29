@@ -951,6 +951,8 @@ class BaseSerialization:
             return TaskInstanceKey(**var)
         elif type_ == DAT.ARG_NOT_SET:
             return NOTSET
+        elif type_ == DAT.DEADLINE_ALERT:
+            return DeadlineAlert.deserialize_deadline_alert(encoded_var)
         else:
             raise TypeError(f"Invalid type {type_!s} in deserialization.")
 

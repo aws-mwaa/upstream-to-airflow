@@ -20,6 +20,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Callable
 
+from airflow.serialization.enums import Encoding
 from airflow.utils.module_loading import import_string, is_valid_dotpath
 
 if TYPE_CHECKING:
@@ -43,9 +44,32 @@ class DeadlineAlert:
         self.callback_kwargs = callback_kwargs
         self.callback = self.get_callback_path(callback)
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, DeadlineAlert):
+            return NotImplemented
+        return (
+            isinstance(self.reference, type(other.reference))
+            and self.interval == other.interval
+            and self.callback == other.callback
+            and self.callback_kwargs == other.callback_kwargs
+        )
+
+    def __hash__(self) -> int:
+        return hash(
+            (
+                type(self.reference).__name__,
+                self.interval,
+                self.callback,
+                tuple(sorted(self.callback_kwargs.items())) if self.callback_kwargs else None,
+            )
+        )
+
     @staticmethod
     def get_callback_path(_callback: str | Callable) -> str:
+        """Convert callback to a string path that can be used to import it later."""
         if callable(_callback):
+            # TODO:  This implementation doesn't support using a lambda function as a callback.
+            #        We should consider that in the future, but the addition is non-trivial.
             # Get the reference path to the callable in the form `airflow.models.deadline.get_from_db`
             return f"{_callback.__module__}.{_callback.__qualname__}"
 
@@ -75,15 +99,36 @@ class DeadlineAlert:
         return stripped_callback
 
     def serialize_deadline_alert(self):
+        """Return the data in a format that BaseSerialization can handle."""
         from airflow.serialization.serialized_objects import BaseSerialization
 
-        return BaseSerialization.serialize(
-            {
-                "reference": self.reference,
-                "interval": self.interval,
-                "callback": self.callback,
-                "callback_kwargs": self.callback_kwargs,
-            }
+        return {
+            "reference": self.reference.reference_name,
+            "interval": BaseSerialization.serialize(self.interval),
+            "callback": BaseSerialization.serialize(self.callback),
+            "callback_kwargs": BaseSerialization.serialize(self.callback_kwargs),
+        }
+
+    @classmethod
+    def deserialize_deadline_alert(cls, encoded_data: dict) -> DeadlineAlert:
+        """Deserialize a DeadlineAlert from serialized data."""
+        from airflow.serialization.serialized_objects import BaseSerialization
+
+        data = encoded_data[Encoding.VAR]
+
+        # Find the matching reference instance by its class name.
+        reference = next(
+            ref
+            for name, ref in vars(DeadlineReference).items()
+            if isinstance(ref, DeadlineReference.ReferenceModels.BaseDeadlineReference)
+            and type(ref).__name__ == data["reference"]
+        )
+
+        return cls(
+            reference=reference,
+            interval=BaseSerialization.deserialize(data["interval"]),
+            callback=BaseSerialization.deserialize(data["callback"]),
+            callback_kwargs=BaseSerialization.deserialize(data["callback_kwargs"]),
         )
 
 
