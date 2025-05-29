@@ -67,10 +67,10 @@ from airflow.callbacks.callback_requests import DagCallbackRequest
 from airflow.configuration import conf as airflow_conf
 from airflow.exceptions import AirflowException, TaskNotFound
 from airflow.listeners.listener import get_listener_manager
-from airflow.models import Deadline, Log
+from airflow.models import Log
 from airflow.models.backfill import Backfill
 from airflow.models.base import Base, StringID
-from airflow.models.deadline import ReferenceModels
+from airflow.models.deadline import Deadline
 from airflow.models.taskinstance import TaskInstance as TI
 from airflow.models.taskinstancehistory import TaskInstanceHistory as TIH
 from airflow.models.tasklog import LogTemplate
@@ -426,6 +426,8 @@ class DagRun(Base, LoggingMixin):
         return self._state
 
     def _set_dagrun_queued_deadline(self):
+        from airflow.models.deadline import ReferenceModels
+
         if (
             self.dag_model
             and (deadline := self.dag_model.deadline)
@@ -1242,6 +1244,11 @@ class DagRun(Base, LoggingMixin):
                     is_failure_callback=False,
                     msg="success",
                 )
+
+            if dag.get_dagrun_deadline():
+                # The dagrun has succeeded, so the deadline is no longer needed.
+
+                Deadline.resolve_deadlines(conditions={Deadline.dagrun_id: self.run_id}, session=session)
 
         # if *all tasks* are deadlocked, the run failed
         elif unfinished.should_schedule and not are_runnable_tasks:

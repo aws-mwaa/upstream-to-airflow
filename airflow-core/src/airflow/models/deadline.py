@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 import sqlalchemy_jsonfield
 import uuid6
-from sqlalchemy import Column, ForeignKey, Index, Integer, String, select
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, and_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import relationship
 from sqlalchemy_utils import UUIDType
@@ -103,6 +103,58 @@ class Deadline(Base):
     def add_deadline(cls, deadline: Deadline, session: Session = NEW_SESSION):
         """Add the provided deadline to the table."""
         session.add(deadline)
+
+    @classmethod
+    @provide_session
+    def resolve_deadlines(cls, conditions: dict[Column, Any], session: Session = NEW_SESSION) -> int:
+        """
+        Remove deadlines from the table which match the provided conditions and return the number or removed records.
+
+        :param conditions: Dictionary of conditions to evaluate against.
+        :param session: Session to use.
+        """
+        # TODO: I named the method `resolve` instead of `remove` or `delete` because
+        #   we are still discussing if we should actually delete the records or flip
+        #   a bool flag to indicate that the deadline has been processed and we no
+        #   longer have to check it. This name covers both conditions and minimizes
+        #   the blast radius should the decision change in the future.
+        from airflow.models import DagRun  # Avoids circular import
+
+        try:
+            # Validate and assemble the filter conditions.
+            filter_conditions = [column == value for column, value in conditions.items()]
+            if not filter_conditions:
+                return 0
+
+            # Get deadlines which match the provided conditions and their associated DagRuns.
+            deadline_dagrun_pairs = (
+                session.query(Deadline, DagRun).join(DagRun).filter(and_(*filter_conditions)).all()
+            )
+            if not deadline_dagrun_pairs:
+                return 0
+
+            # Split the results into two tuples.
+            deadlines, dagruns = zip(*deadline_dagrun_pairs)
+
+            for deadline in deadlines:
+                session.delete(deadline)
+            session.flush()
+
+            result = len(deadlines)
+            logger.debug("%d deadline records were deleted matching the conditions %s", result, conditions)
+
+            # Refresh any affected DAG runs
+            for dagrun in set(dagruns):
+                session.refresh(dagrun)
+
+            return result
+
+        except SQLAlchemyError as e:
+            invalid_column = next(iter(conditions.keys()))  # Get the first key that caused the error.
+            message = f"Invalid column '{invalid_column}' specified in conditions while resolving deadlines. Rolling back changes."
+            logger.exception(message)
+            session.rollback()
+            raise SQLAlchemyError(message) from e
 
 
 class ReferenceModels:

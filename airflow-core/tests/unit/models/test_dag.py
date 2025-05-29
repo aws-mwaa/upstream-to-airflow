@@ -2039,6 +2039,7 @@ my_postgres_conn:
         DAG.bulk_write_to_db("testing", None, [dag])
         assert dag.get_bundle_version() is None
         DAG.bulk_write_to_db("testing", "abc", [dag])
+        DAG.bulk_write_to_db("testing", "abc", [dag])
         assert dag.get_bundle_version() == "abc"
 
     @pytest.mark.parametrize(

@@ -35,6 +35,7 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.models.dag import DAG, DagModel
 from airflow.models.dag_version import DagVersion
 from airflow.models.dagrun import DagRun, DagRunNote
+from airflow.models.deadline import Deadline
 from airflow.models.serialized_dag import SerializedDagModel
 from airflow.models.taskinstance import TaskInstance, TaskInstanceNote, clear_task_instances
 from airflow.models.taskmap import TaskMap
@@ -1297,14 +1298,22 @@ class TestDagRun:
         ):
             ...
         dag_run = dag_maker.create_dagrun()
-        assert not dag_run.deadlines  # No deadline should exist yet
+        assert not dag_run.deadlines  # No deadline should exist yet.
 
         dag_run.set_state(DagRunState.QUEUED)
         session.flush()
         dag_run = session.query(DagRun).get(dag_run.id)
 
+        # The queued_at deadline should now be found and have the correct value.
         assert len(dag_run.deadlines) == 1
         assert dag_run.deadlines[0].deadline == dag_run.queued_at + interval
+
+        # Now set theDagRun state to success and resolve deadlines.
+        dag_run.set_state(DagRunState.SUCCESS)
+        Deadline.resolve_deadlines(conditions={Deadline.dagrun_id: dag_run.id}, session=session)
+
+        # Check that the deadline was removed after reaching a SUCCESS state.
+        assert len(dag_run.deadlines) == 0
 
 
 @pytest.mark.parametrize(

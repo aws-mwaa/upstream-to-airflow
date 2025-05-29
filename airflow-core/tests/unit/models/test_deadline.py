@@ -36,6 +36,8 @@ from unit.models import DEFAULT_DATE
 
 DAG_ID = "dag_id_1"
 RUN_ID = 1
+INVALID_DAG_ID = "invalid_dag_id"
+INVALID_RUN_ID = 2
 
 TEST_CALLBACK_PATH = f"{__name__}.test_callback_for_deadline"
 TEST_CALLBACK_KWARGS = {"arg1": "value1"}
@@ -101,6 +103,47 @@ class TestDeadline:
         assert result.deadline == deadline_orm.deadline
         assert result.callback == deadline_orm.callback
         assert result.callback_kwargs == deadline_orm.callback_kwargs
+
+    @pytest.mark.parametrize(
+        "conditions",
+        [
+            pytest.param({}, id="empty_conditions"),
+            pytest.param({Deadline.dagrun_id: INVALID_RUN_ID}, id="no_matches"),
+            pytest.param({Deadline.dagrun_id: RUN_ID}, id="single_condition"),
+            pytest.param({Deadline.dagrun_id: RUN_ID, Deadline.dag_id: DAG_ID}, id="multiple_conditions"),
+            pytest.param(
+                {Deadline.dagrun_id: RUN_ID, Deadline.dag_id: INVALID_DAG_ID}, id="mixed_conditions"
+            ),
+        ],
+    )
+    @mock.patch("sqlalchemy.orm.Session")
+    def test_resolve_deadlines(
+        self,
+        mock_session,
+        conditions,
+    ):
+        """Test deadline resolution with various conditions."""
+        mock_delete = mock.MagicMock()
+        mock_session.query.return_value.filter.return_value.delete = mock_delete
+
+        Deadline.resolve_deadlines(conditions=conditions, session=mock_session)
+
+        if conditions:
+            mock_session.query.assert_called_once_with(Deadline)
+            mock_session.query.return_value.filter.assert_called_once()  # Assert that the conditions are applied.
+            mock_delete.assert_called_once()
+        else:
+            mock_session.query.assert_not_called()
+
+    @mock.patch("sqlalchemy.orm.Session")
+    def test_resolve_deadlines_invalid_column(self, mock_session):
+        """Test that using an invalid column raises an error."""
+        invalid_column = DagRun.bundle_version  # A column that exists but not on the Deadline table.
+        error_msg = f"Invalid column '{invalid_column}' specified in conditions while resolving deadlines. Rolling back changes."
+        mock_session.query.return_value.filter.side_effect = SQLAlchemyError("Invalid column")
+
+        with pytest.raises(SQLAlchemyError, match=error_msg):
+            Deadline.resolve_deadlines(conditions={invalid_column: "value"}, session=mock_session)
 
     def test_orm(self):
         deadline_orm = Deadline(
