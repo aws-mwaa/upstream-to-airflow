@@ -85,18 +85,18 @@ COMMAND = """
             status=$?
 
             if [ "$status" -ne 0 ]; then
-                printf '%s\n' "$output" >&2
+                printf '%s' "$output" >&2
                 exit "$status"
             fi
 
             # Use pure bash below to parse so that it's posix compliant
 
-            last_line=${output##*$'\n'}  # strip everything up to the last newline
+            last_line=${{output##*$'\\n'}}  # strip everything up to the last newline
 
-            timestamp=${last_line#expirationTimestamp: }  # drop the label
-            timestamp=${timestamp%%,*}  # keep up to the first comma
+            timestamp=${{last_line#expirationTimestamp: }}  # drop the label
+            timestamp=${{timestamp%%,*}}  # keep up to the first comma
 
-            token=${last_line##*, token: }  # text after ", token: "
+            token=${{last_line##*, token: }}  # text after ", token: "
 
             json_string=$(printf '{{"kind": "ExecCredential","apiVersion": \
                 "client.authentication.k8s.io/v1alpha1","spec": {{}},"status": \
