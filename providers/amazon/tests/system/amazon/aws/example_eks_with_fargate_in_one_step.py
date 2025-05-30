@@ -29,8 +29,8 @@ from airflow.providers.amazon.aws.operators.eks import (
 from airflow.providers.amazon.aws.sensors.eks import EksClusterStateSensor, EksFargateProfileStateSensor
 from airflow.utils.trigger_rule import TriggerRule
 
-# from system.amazon.aws.utils import ENV_ID_KEY, SystemTestContextBuilder
-# from system.amazon.aws.utils.k8s import get_describe_pod_operator
+from system.amazon.aws.utils import ENV_ID_KEY, SystemTestContextBuilder
+from system.amazon.aws.utils.k8s import get_describe_pod_operator
 from airflow.decorators import task
 
 DAG_ID = "example_eks_with_fargate_in_one_step"
@@ -42,27 +42,13 @@ CLUSTER_ROLE_ARN_KEY = "CLUSTER_ROLE_ARN"
 FARGATE_POD_ROLE_ARN_KEY = "FARGATE_POD_ROLE_ARN"
 SUBNETS_KEY = "SUBNETS"
 
-# sys_test_context_task = (
-#     SystemTestContextBuilder()
-#     .add_variable(CLUSTER_ROLE_ARN_KEY)
-#     .add_variable(FARGATE_POD_ROLE_ARN_KEY)
-#     .add_variable(SUBNETS_KEY, split_string=True)
-#     .build()
-# )
-
-@task()
-def hello_world_again():
-    # run the following command in a subprocess: `python /opt/airflow/providers/amazon/src/airflow/providers/amazon/aws/utils/eks_get_token.py --cluster-name envc80d4dee-cluster`
-    import subprocess
-    import os
-    cluster_name = "envc80d4dee-cluster"
-    command = f"python /opt/airflow/providers/amazon/src/airflow/providers/amazon/aws/utils/eks_get_token.py --cluster-name {cluster_name}"
-    print(f'Running command: {command}')
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f'Command failed with error: {result.stderr}')
-        raise Exception(f'Command failed: {result.stderr}')
-    print(f'Command output: {result.stdout}')
+sys_test_context_task = (
+    SystemTestContextBuilder()
+    .add_variable(CLUSTER_ROLE_ARN_KEY)
+    .add_variable(FARGATE_POD_ROLE_ARN_KEY)
+    .add_variable(SUBNETS_KEY, split_string=True)
+    .build()
+)
 
 with DAG(
     dag_id=DAG_ID,
@@ -71,91 +57,89 @@ with DAG(
     tags=["example"],
     catchup=False,
 ) as dag:
-    # test_context = sys_test_context_task()
-    # env_id = test_context[ENV_ID_KEY]
-    # cluster_role_arn = test_context[CLUSTER_ROLE_ARN_KEY]
-    # fargate_pod_role_arn = test_context[FARGATE_POD_ROLE_ARN_KEY]
-    # subnets = test_context[SUBNETS_KEY]
-    hwa = hello_world_again()
+    test_context = sys_test_context_task()
+    env_id = test_context[ENV_ID_KEY]
+    cluster_role_arn = test_context[CLUSTER_ROLE_ARN_KEY]
+    fargate_pod_role_arn = test_context[FARGATE_POD_ROLE_ARN_KEY]
+    subnets = test_context[SUBNETS_KEY]
 
-    # cluster_name = f"{env_id}-cluster"
-    # fargate_profile_name = f"{env_id}-profile"
-    # test_name = f"{env_id}_{DAG_ID}"
+    cluster_name = f"{env_id}-cluster"
+    fargate_profile_name = f"{env_id}-profile"
+    test_name = f"{env_id}_{DAG_ID}"
 
-    # # [START howto_operator_eks_create_cluster_with_fargate_profile]
-    # # Create an Amazon EKS cluster control plane and an AWS Fargate compute platform in one step.
-    # create_cluster_and_fargate_profile = EksCreateClusterOperator(
-    #     task_id="create_eks_cluster_and_fargate_profile",
-    #     cluster_name=cluster_name,
-    #     cluster_role_arn=cluster_role_arn,
-    #     resources_vpc_config={
-    #         "subnetIds": subnets,
-    #         "endpointPublicAccess": True,
-    #         "endpointPrivateAccess": False,
-    #     },
-    #     compute="fargate",
-    #     fargate_profile_name=fargate_profile_name,
-    #     # Opting to use the same ARN for the cluster and the pod here,
-    #     # but a different ARN could be configured and passed if desired.
-    #     fargate_pod_execution_role_arn=fargate_pod_role_arn,
-    # )
-    # # [END howto_operator_eks_create_cluster_with_fargate_profile]
+    # [START howto_operator_eks_create_cluster_with_fargate_profile]
+    # Create an Amazon EKS cluster control plane and an AWS Fargate compute platform in one step.
+    create_cluster_and_fargate_profile = EksCreateClusterOperator(
+        task_id="create_eks_cluster_and_fargate_profile",
+        cluster_name=cluster_name,
+        cluster_role_arn=cluster_role_arn,
+        resources_vpc_config={
+            "subnetIds": subnets,
+            "endpointPublicAccess": True,
+            "endpointPrivateAccess": False,
+        },
+        compute="fargate",
+        fargate_profile_name=fargate_profile_name,
+        # Opting to use the same ARN for the cluster and the pod here,
+        # but a different ARN could be configured and passed if desired.
+        fargate_pod_execution_role_arn=fargate_pod_role_arn,
+    )
+    # [END howto_operator_eks_create_cluster_with_fargate_profile]
 
-    # await_create_fargate_profile = EksFargateProfileStateSensor(
-    #     task_id="await_create_fargate_profile",
-    #     cluster_name=cluster_name,
-    #     fargate_profile_name=fargate_profile_name,
-    #     target_state=FargateProfileStates.ACTIVE,
-    # )
+    await_create_fargate_profile = EksFargateProfileStateSensor(
+        task_id="await_create_fargate_profile",
+        cluster_name=cluster_name,
+        fargate_profile_name=fargate_profile_name,
+        target_state=FargateProfileStates.ACTIVE,
+    )
 
-    # start_pod = EksPodOperator(
-    #     task_id="run_pod",
-    #     pod_name="run_pod",
-    #     cluster_name=cluster_name,
-    #     image="amazon/aws-cli:latest",
-    #     cmds=["sh", "-c", "echo Test Airflow; date"],
-    #     labels={"demo": "hello_world"},
-    #     get_logs=True,
-    #     startup_timeout_seconds=600,
-    #     # Keep the pod alive, so we can describe it in case of trouble. It's deleted with the cluster anyway.
-    #     on_finish_action="keep_pod",
-    # )
+    start_pod = EksPodOperator(
+        task_id="run_pod",
+        pod_name="run_pod",
+        cluster_name=cluster_name,
+        image="amazon/aws-cli:latest",
+        cmds=["sh", "-c", "echo Test Airflow; date"],
+        labels={"demo": "hello_world"},
+        get_logs=True,
+        startup_timeout_seconds=600,
+        # Keep the pod alive, so we can describe it in case of trouble. It's deleted with the cluster anyway.
+        on_finish_action="keep_pod",
+    )
 
-    # describe_pod = get_describe_pod_operator(
-    #     cluster_name, pod_name="{{ ti.xcom_pull(key='pod_name', task_ids='run_pod') }}"
-    # )
-    # # only describe the pod if the task above failed, to help diagnose
-    # describe_pod.trigger_rule = TriggerRule.ONE_FAILED
+    describe_pod = get_describe_pod_operator(
+        cluster_name, pod_name="{{ ti.xcom_pull(key='pod_name', task_ids='run_pod') }}"
+    )
+    # only describe the pod if the task above failed, to help diagnose
+    describe_pod.trigger_rule = TriggerRule.ONE_FAILED
 
-    # # An Amazon EKS cluster can not be deleted with attached resources such as nodegroups or Fargate profiles.
-    # # Setting the `force` to `True` will delete any attached resources before deleting the cluster.
-    # delete_cluster_and_fargate_profile = EksDeleteClusterOperator(
-    #     task_id="delete_fargate_profile_and_cluster",
-    #     trigger_rule=TriggerRule.ALL_DONE,
-    #     cluster_name=cluster_name,
-    #     force_delete_compute=True,
-    # )
+    # An Amazon EKS cluster can not be deleted with attached resources such as nodegroups or Fargate profiles.
+    # Setting the `force` to `True` will delete any attached resources before deleting the cluster.
+    delete_cluster_and_fargate_profile = EksDeleteClusterOperator(
+        task_id="delete_fargate_profile_and_cluster",
+        trigger_rule=TriggerRule.ALL_DONE,
+        cluster_name=cluster_name,
+        force_delete_compute=True,
+    )
 
-    # await_delete_cluster = EksClusterStateSensor(
-    #     task_id="await_delete_cluster",
-    #     trigger_rule=TriggerRule.ALL_DONE,
-    #     cluster_name=cluster_name,
-    #     target_state=ClusterStates.NONEXISTENT,
-    #     poke_interval=10,
-    # )
+    await_delete_cluster = EksClusterStateSensor(
+        task_id="await_delete_cluster",
+        trigger_rule=TriggerRule.ALL_DONE,
+        cluster_name=cluster_name,
+        target_state=ClusterStates.NONEXISTENT,
+        poke_interval=10,
+    )
 
     chain(
         # TEST SETUP
-        hwa,
-        # test_context,
+        test_context,
         # TEST BODY
-        # create_cluster_and_fargate_profile,
-        # await_create_fargate_profile,
-        # start_pod,
+        create_cluster_and_fargate_profile,
+        await_create_fargate_profile,
+        start_pod,
         # TEST TEARDOWN
-        # describe_pod,
-        # delete_cluster_and_fargate_profile,
-        # await_delete_cluster,
+        describe_pod,
+        delete_cluster_and_fargate_profile,
+        await_delete_cluster,
     )
 
     from tests_common.test_utils.watcher import watcher
