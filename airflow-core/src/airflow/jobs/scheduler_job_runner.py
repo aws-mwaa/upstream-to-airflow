@@ -28,7 +28,7 @@ from collections import Counter, defaultdict, deque
 from collections.abc import Collection, Iterable, Iterator
 from contextlib import ExitStack
 from datetime import date, timedelta
-from functools import lru_cache, partial
+from functools import cached_property, lru_cache, partial
 from itertools import groupby
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -597,7 +597,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                             )
                             continue
 
-                if executor_obj := self._try_to_load_executor(task_instance.executor):
+                if executor_obj := self._try_to_load_executor(task_instance):
                     if TYPE_CHECKING:
                         # All executors should have a name if they are initted from the executor_loader.
                         # But we need to check for None to make mypy happy.
@@ -739,6 +739,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
         queued_tis = self._executable_task_instances_to_queued(max_tis, session=session)
 
+        # TODO[multi]: Test that this still works when we have multiple executors due to multi team
         # Sort queued TIs to their respective executor
         executor_to_queued_tis = self._executor_to_tis(queued_tis)
         for executor, queued_tis_per_executor in executor_to_queued_tis.items():
@@ -1944,6 +1945,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         scheduled) up to 2 times before failing the task.
         """
         tasks_stuck_in_queued = self._get_tis_stuck_in_queued(session)
+        # TODO[multi] Test this with multiple executors/teams
         for executor, stuck_tis in self._executor_to_tis(tasks_stuck_in_queued).items():
             try:
                 for ti in stuck_tis:
@@ -2143,6 +2145,8 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     tis_to_adopt_or_reset = session.scalars(tis_to_adopt_or_reset).all()
 
                     to_reset: list[TaskInstance] = []
+                    # TODO[multi] Test this with multiple executors/teams. Tasks should be sent to the
+                    # correct team's executor.
                     exec_to_tis = self._executor_to_tis(tis_to_adopt_or_reset)
                     for executor, tis in exec_to_tis.items():
                         to_reset.extend(executor.try_adopt_task_instances(tis))
@@ -2247,6 +2251,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
     def _purge_task_instances_without_heartbeats(
         self, task_instances_without_heartbeats: list[TI], *, session: Session
     ) -> None:
+        # TODO[multi]: Test me when there are multiple executors from multiple teams
         for ti in task_instances_without_heartbeats:
             task_instance_heartbeat_timeout_message_details = (
                 self._generate_task_instance_heartbeat_timeout_message_details(ti)
@@ -2277,7 +2282,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 request,
             )
             self.job.executor.send_callback(request)
-            if (executor := self._try_to_load_executor(ti.executor)) is None:
+            if (executor := self._try_to_load_executor(ti)) is None:
                 self.log.warning(
                     "Cannot clean up task instance without heartbeat %r with non-existent executor %s",
                     ti,
@@ -2428,26 +2433,38 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
     def _executor_to_tis(self, tis: Iterable[TaskInstance]) -> dict[BaseExecutor, list[TaskInstance]]:
         """Organize TIs into lists per their respective executor."""
+        # TODO: Test this with multiple executors across teams
         _executor_to_tis: defaultdict[BaseExecutor, list[TaskInstance]] = defaultdict(list)
         for ti in tis:
-            if executor_obj := self._try_to_load_executor(ti.executor):
+            if executor_obj := self._try_to_load_executor(ti):
                 _executor_to_tis[executor_obj].append(ti)
 
         return _executor_to_tis
 
-    def _try_to_load_executor(self, executor_name: str | None) -> BaseExecutor | None:
+    def _try_to_load_executor(self, ti: TaskInstance) -> BaseExecutor | None:
         """
         Try to load the given executor.
 
         In this context, we don't want to fail if the executor does not exist. Catch the exception and
         log to the user.
         """
-        if executor_name is None:
-            return self.job.executor
+        team_id = ti.team_id
+        # Either the executors for a team, or global if the task had no team_id
+        executors: list[BaseExecutor] = self._executors_per_team.get(team_id, [])
+        if not executors:
+            # If no executors are found for the team, notify the user but don't fail the scheduler.
+            self.log.warning("No executors found for team %s. Task %s will not be executed.", team_id, ti.key)
 
-        for e in self.job.executors:
-            if e.name.alias == executor_name or e.name.module_path == executor_name:
-                return e
+        executor_name = ti.executor
+        if executor_name is None:
+            # First executor in the list is the default executor used if no executor is specified
+            return executors[0]
+
+        for executor in executors:
+            # TODO: I do not know why I need this assertion here now, but mypy complains if I don't have it.
+            if executor.name is not None:
+                if executor.name.alias == executor_name or executor.name.module_path == executor_name:
+                    return executor
 
         # This case should not happen unless some (as of now unknown) edge case occurs or direct DB
         # modification, since the DAG parser will validate the tasks in the DAG and ensure the executor
@@ -2456,3 +2473,18 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         # ourselves here and the user should get some feedback about that.
         self.log.warning("Executor, %s, was not found but a Task was configured to use it", executor_name)
         return None
+
+    @cached_property
+    def _executors_per_team(self) -> dict[str | None, list[BaseExecutor]]:
+        """
+        Executors per team.
+
+        Each executor is either assigned to a team (executor.team_id) or is not assigned to any team (team_id
+        is None). This method returns a dictionary where the keys are team IDs and the values are lists of
+        executors assigned to that team. If an executor is not assigned to any team, it will be included in
+        the dictionary with a key of None.
+        """
+        executors_per_team: dict[str | None, list[BaseExecutor]] = defaultdict(list)
+        for executor in self.job.executors:
+            executors_per_team[executor.team_id].append(executor)
+        return executors_per_team

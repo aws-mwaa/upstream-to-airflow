@@ -168,6 +168,8 @@ class ExecutorLoader:
 
         team_config = conf.get("core", "multi_team_config_files", fallback=None)
         configs = []
+        # TODO: It's important that the order is maintained here, since the default executor is the first
+        # one. Be sure to write a unit test for this.
         if team_config:
             cls.block_use_of_multi_team()
             for team in team_config.split(","):
