@@ -48,6 +48,7 @@ from airflow.utils.helpers import prune_dict
 
 def _fetch_templated_kwargs() -> dict[str, str]:
     run_task_kwargs_value = conf.get(CONFIG_GROUP_NAME, AllEcsConfigKeys.RUN_TASK_KWARGS, fallback=dict())
+    print("hi")
     return json.loads(str(run_task_kwargs_value))
 
 
