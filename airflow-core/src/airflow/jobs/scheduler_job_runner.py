@@ -45,7 +45,7 @@ from airflow.dag_processing.bundles.base import BundleUsageTrackingManager
 from airflow.executors import workloads
 from airflow.jobs.base_job_runner import BaseJobRunner
 from airflow.jobs.job import Job, perform_heartbeat
-from airflow.models import Log
+from airflow.models import Deadline, Log
 from airflow.models.asset import (
     AssetActive,
     AssetAliasModel,
@@ -1203,6 +1203,8 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             #. Heartbeat executor
                 #. Execute queued tasks in executor asynchronously
                 #. Sync on the states of running tasks
+            #. Check for expired Deadlines
+                #. Hand off processing the expired Deadlines if any are found
         """
         is_unit_test: bool = conf.getboolean("core", "unit_test_mode")
 
@@ -1304,6 +1306,14 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                             self._process_task_event_logs(executor._task_event_logs, session)
                     except Exception:
                         self.log.exception("Something went wrong when trying to save task event logs.")
+
+                with create_session() as session:
+                    for deadline in session.scalars(
+                        select(Deadline)
+                        .where(Deadline.deadline_time < datetime.now(timezone.utc))
+                        .where(Deadline.callback_state.is_(None))
+                    ):
+                        deadline.handle_miss(session)
 
                 # Heartbeat the scheduler periodically
                 perform_heartbeat(

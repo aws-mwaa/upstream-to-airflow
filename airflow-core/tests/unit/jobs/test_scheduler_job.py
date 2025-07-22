@@ -49,6 +49,7 @@ from airflow.executors.executor_loader import ExecutorLoader
 from airflow.executors.executor_utils import ExecutorName
 from airflow.jobs.job import Job, run_job
 from airflow.jobs.scheduler_job_runner import SchedulerJobRunner
+from airflow.models import Deadline
 from airflow.models.asset import (
     AssetActive,
     AssetAliasModel,
@@ -6653,6 +6654,50 @@ class TestSchedulerJob:
         assert callback_request.context_from_server is not None
         assert callback_request.context_from_server.dag_run.logical_date == dag_run.logical_date
         assert callback_request.context_from_server.max_tries == ti.max_tries
+
+    @mock.patch('airflow.models.Deadline.handle_miss')
+    def test_process_expired_deadlines(self, mock_handle, session):
+        """Verify all expired and unhandled deadlines (and only those) are processed by the scheduler."""
+        scheduler_job = Job()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job)
+        expired_deadline1 = Deadline(
+            deadline_time=timezone.utcnow() - timedelta(minutes=5),
+            callback_state=None,
+            callback=print,
+        )
+        expired_deadline2 = Deadline(
+            deadline_time=timezone.utcnow() - timedelta(minutes=10),
+            callback_state=None,
+            callback=print,
+        )
+        future_deadline = Deadline(
+            deadline_time=timezone.utcnow() + timedelta(minutes=5),
+            callback_state=None,
+            callback=print,
+        )
+        handled_deadline = Deadline(
+            deadline_time=timezone.utcnow() - timedelta(minutes=5),
+            callback_state=DeadlineCallbackState.SUCCESS,
+            callback=print,
+        )
+        session.add_all([expired_deadline1, expired_deadline2, future_deadline, handled_deadline])
+        session.commit()
+
+        self.job_runner._execute()
+
+        # Assert that all deadlines which are both expired and unhandled get processed.
+        assert mock_handle.call_count == 2
+
+    @mock.patch('airflow.models.Deadline.handle_miss')
+    def test_process_expired_deadlines_no_deadlines_found(self, mock_handle, session):
+        """Test handling when there are no deadlines to process."""
+        scheduler_job = Job()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job)
+
+        self.job_runner._execute()
+
+        # The handler should not be called, but no exceptions should be raised either.
+        mock_handle.assert_not_called()
 
 
 @pytest.mark.need_serialized_dag
