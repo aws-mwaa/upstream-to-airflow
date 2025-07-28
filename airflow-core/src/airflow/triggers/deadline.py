@@ -18,6 +18,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -46,6 +48,9 @@ class DeadlineCallbackTrigger(BaseTrigger):
 
     async def run(self) -> AsyncIterator[TriggerEvent]:
         from airflow.models.deadline import DeadlineCallbackState  # to avoid cyclic imports
+
+        if (dagbag := os.environ.get('AIRFLOW__CORE__DAGS_FOLDER')) not in sys.path:
+            sys.path.append(dagbag)
 
         try:
             callback = import_string(self.callback_path)

@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from airflow.models.deadline import DeadlineReferenceType, ReferenceModels
 from airflow.serialization.enums import DagAttributeTypes as DAT, Encoding
+from airflow.utils.file import MODIFIED_DAG_MODULE_NAME
 from airflow.utils.module_loading import import_string, is_valid_dotpath
 
 logger = logging.getLogger(__name__)
@@ -78,12 +80,20 @@ class DeadlineAlert:
 
     @staticmethod
     def get_callback_path(_callback: str | Callable) -> str:
-        """Convert callback to a string path that can be used to import it later."""
+        """
+        Convert callback to a string path that can be used to import it later.
+
+        NOTE:  This implementation doesn't support using a lambda function as a callback.
+               We should consider that in the future, but the addition is non-trivial.
+        """
         if callable(_callback):
-            # TODO:  This implementation doesn't support using a lambda function as a callback.
-            #        We should consider that in the future, but the addition is non-trivial.
-            # Get the reference path to the callable in the form `airflow.models.deadline.get_from_db`
-            return f"{_callback.__module__}.{_callback.__qualname__}"
+            # Get the reference path to the callable in the form `airflow.models.deadline.get_from_db`.
+            # DAG file module names are modified to add a special prefix which we need to remove if present.
+            module = _callback.__module__
+            dag_module_pattern = MODIFIED_DAG_MODULE_NAME.format(path_hash=r"[0-9a-f]+", module_name=r"(.*)")
+            is_dag = bool(dag_module := re.match(dag_module_pattern, module))
+            original_module = dag_module.group(1) if is_dag else module
+            return f"{original_module}.{_callback.__qualname__}"
 
         if not isinstance(_callback, str) or not is_valid_dotpath(_callback.strip()):
             raise ImportError(f"`{_callback}` doesn't look like a valid dot path.")
