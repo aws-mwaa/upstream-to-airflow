@@ -1244,6 +1244,64 @@ class TestDagRun:
         # the latest task instance dag_version
         assert dag_run.version_number == dag_v.version_number
 
+    def test_dag_run_dag_versions_with_null_created_dag_version(self, dag_maker, session):
+        """Test that dag_versions returns empty list when created_dag_version is None and bundle_version is populated."""
+        with dag_maker(
+            "test_dag_run_null_created_dag_version",
+            schedule=datetime.timedelta(days=1),
+            start_date=DEFAULT_DATE,
+        ):
+            EmptyOperator(task_id="empty")
+        dag_run = dag_maker.create_dagrun()
+
+        dag_run.bundle_version = "some_bundle_version"
+        dag_run.created_dag_version_id = None
+        dag_run.created_dag_version = None
+        session.merge(dag_run)
+        session.flush()
+
+        # This should return empty list, not [None]
+        assert dag_run.dag_versions == []
+        assert isinstance(dag_run.dag_versions, list)
+        assert len(dag_run.dag_versions) == 0
+
+    def test_dagrun_success_deadline(self, dag_maker, session):
+        def on_success_callable(context):
+            assert context["dag_run"].dag_id == "test_dagrun_success_callback"
+
+        future_date = datetime.datetime.now() + datetime.timedelta(days=365)
+
+        with dag_maker(
+            dag_id="test_dagrun_success_callback",
+            schedule=datetime.timedelta(days=1),
+            on_success_callback=on_success_callable,
+            deadline=DeadlineAlert(
+                reference=DeadlineReference.FIXED_DATETIME(future_date),
+                interval=datetime.timedelta(hours=1),
+                callback=test_callback_for_deadline,
+            ),
+        ) as dag:
+            ...
+        dag_task1 = EmptyOperator(task_id="test_state_succeeded1", dag=dag)
+        dag_task2 = EmptyOperator(task_id="test_state_succeeded2", dag=dag)
+        dag_task1.set_downstream(dag_task2)
+
+        initial_task_states = {
+            "test_state_succeeded1": TaskInstanceState.SUCCESS,
+            "test_state_succeeded2": TaskInstanceState.SUCCESS,
+        }
+
+        # Scheduler uses Serialized DAG -- so use that instead of the Actual DAG.
+        dag = SerializedDAG.from_dict(SerializedDAG.to_dict(dag))
+        dag_run = self.create_dag_run(dag=dag, task_states=initial_task_states, session=session)
+        dag_run = session.merge(dag_run)
+        dag_run.dag = dag
+
+        _, callback = dag_run.update_state()
+        assert dag_run.state == DagRunState.SUCCESS
+        # Callbacks are not added until handle_callback = False is passed to dag_run.update_state()
+        assert callback is None
+
 
 @pytest.mark.parametrize(
     ("run_type", "expected_tis"),
