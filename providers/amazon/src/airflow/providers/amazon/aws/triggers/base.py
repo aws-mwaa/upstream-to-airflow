@@ -25,6 +25,8 @@ from airflow.providers.amazon.aws.utils.waiter_with_logging import async_wait
 from airflow.triggers.base import BaseTrigger, TriggerEvent
 from airflow.utils.helpers import prune_dict
 
+from contextlib import asynccontextmanager
+
 if TYPE_CHECKING:
     from airflow.providers.amazon.aws.hooks.base_aws import AwsGenericHook
 
@@ -105,6 +107,7 @@ class AwsBaseWaiterTrigger(BaseTrigger):
         self.region_name = region_name
         self.verify = verify
         self.botocore_config = botocore_config
+        self.client = None
 
     def serialize(self) -> tuple[str, dict[str, Any]]:
         # here we put together the "common" params,
@@ -140,9 +143,18 @@ class AwsBaseWaiterTrigger(BaseTrigger):
     def hook(self) -> AwsGenericHook:
         """Override in subclasses to return the right hook."""
 
+    @asynccontextmanager
+    async def get_managed_client(self):
+        if not self.client:
+            self.client = await self.hook().get_async_conn()
+        try:
+            yield self.client
+        finally:
+            pass
+
     async def run(self) -> AsyncIterator[TriggerEvent]:
-        hook = self.hook()
-        async with await hook.get_async_conn() as client:
+        async with self.get_managed_client() as client:
+            hook = self.hook()
             waiter = hook.get_waiter(
                 self.waiter_name,
                 deferrable=True,
