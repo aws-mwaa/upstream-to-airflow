@@ -95,10 +95,10 @@ PREFIX_LIST = [details["prefix"] for details in RESOURCE_DETAILS_MAP.values()]
 PREFIX_RESOURCES_MAP = {details["prefix"]: resource for resource, details in RESOURCE_DETAILS_MAP.items()}
 
 
-def resource_name(root_dag_id: str, resource: str) -> str:
+def resource_name(dag_id: str, resource: str) -> str:
     """Return the resource name for a DAG id."""
-    if root_dag_id in RESOURCE_DETAILS_MAP.keys():
-        return root_dag_id
-    if root_dag_id.startswith(tuple(PREFIX_RESOURCES_MAP.keys())):
-        return root_dag_id
-    return f"{RESOURCE_DETAILS_MAP[resource]['prefix']}{root_dag_id}"
+    if dag_id in RESOURCE_DETAILS_MAP.keys():
+        return dag_id
+    if dag_id.startswith(tuple(PREFIX_RESOURCES_MAP.keys())):
+        return dag_id
+    return f"{RESOURCE_DETAILS_MAP[resource]['prefix']}{dag_id}"
