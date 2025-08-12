@@ -19,6 +19,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+import boto3
+
 from airflow.providers.amazon.aws.operators.sagemaker_unified_studio import (
     SageMakerNotebookOperator,
 )
@@ -37,7 +39,7 @@ else:
         from airflow.decorators import task
         from airflow.models.baseoperator import chain
         from airflow.models.dag import DAG
-from system.amazon.aws.utils import ENV_ID_KEY, SystemTestContextBuilder
+from system.amazon.aws.utils import SystemTestContextBuilder
 
 """
 Prerequisites: The account which runs this test must manually have the following:
@@ -51,7 +53,7 @@ The setup tasks will set up the project and configure the test runner to emulate
 Then, the SageMakerNotebookOperator will run a test notebook. This should spin up a SageMaker training job, run the notebook, and exit successfully.
 """
 
-DAG_ID = "example_sagemaker_unified_studio"
+DAG_ID = "example_sagemaker_unified_studiozzz"
 
 # Externally fetched variables:
 DOMAIN_ID_KEY = "DOMAIN_ID"
@@ -113,12 +115,11 @@ with DAG(
 ) as dag:
     test_context = sys_test_context_task()
 
-    test_env_id = test_context[ENV_ID_KEY]
     domain_id = test_context[DOMAIN_ID_KEY]
     project_id = test_context[PROJECT_ID_KEY]
     environment_id = test_context[ENVIRONMENT_ID_KEY]
     s3_path = test_context[S3_PATH_KEY]
-    region_name = test_context[REGION_NAME_KEY]
+    region_name = boto3.session.Session().region_name
 
     mock_mwaa_environment_params = get_mwaa_environment_params(
         domain_id,
