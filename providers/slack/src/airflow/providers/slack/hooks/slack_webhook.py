@@ -164,14 +164,14 @@ class SlackWebhookHook(BaseHook):
     def _get_conn_params(self) -> dict[str, Any]:
         """Fetch connection params as a dict and merge it with hook parameters."""
         conn = self.get_connection(self.slack_webhook_conn_id)
-        return self._build_conn_params(conn)
+        return self._build_conn_params(conn, conn.extra_dejson)
 
     async def _async_get_conn_params(self) -> dict[str, Any]:
         """Fetch connection params as a dict and merge it with hook parameters (async)."""
         conn = await self.aget_connection(self.slack_webhook_conn_id)
-        return self._build_conn_params(conn)
+        return self._build_conn_params(conn, await conn.async_extra_dejson())
 
-    def _build_conn_params(self, conn) -> dict[str, Any]:
+    def _build_conn_params(self, conn, extra_dejson: dict) -> dict[str, Any]:
         """Build connection parameters from connection object."""
         if not conn.password or not conn.password.strip():
             raise AirflowNotFoundException(
@@ -192,7 +192,7 @@ class SlackWebhookHook(BaseHook):
 
         conn_params: dict[str, Any] = {"url": url, "retry_handlers": self.retry_handlers}
         extra_config = ConnectionExtraConfig(
-            conn_type=self.conn_type, conn_id=conn.conn_id, extra=conn.extra_dejson
+            conn_type=self.conn_type, conn_id=conn.conn_id, extra=extra_dejson
         )
         # Merge Hook parameters with Connection config
         conn_params.update(

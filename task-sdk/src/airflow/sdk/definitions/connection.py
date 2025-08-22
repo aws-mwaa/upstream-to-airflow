@@ -213,20 +213,32 @@ class Connection:
         except AirflowRuntimeError as e:
             cls._handle_connection_error(e, conn_id)
 
+    def _deserialize_extra(self) -> dict:
+        """Deserialize extra property from JSON."""
+        if self.extra:
+            try:
+                return json.loads(self.extra)
+            except JSONDecodeError:
+                log.exception("Failed to deserialize extra property `extra`, returning empty dictionary")
+        return {}
+
     @property
     def extra_dejson(self) -> dict:
         """Returns the extra property by deserializing json."""
         from airflow.sdk.execution_time.secrets_masker import mask_secret
 
-        extra = {}
-        if self.extra:
-            try:
-                extra = json.loads(self.extra)
-            except JSONDecodeError:
-                log.exception("Failed to deserialize extra property `extra`, returning empty dictionary")
-            else:
-                mask_secret(extra)
+        extra = self._deserialize_extra()
+        if extra:
+            mask_secret(extra)
+        return extra
 
+    async def async_extra_dejson(self) -> dict:
+        """Return the extra property by deserializing json (with async secret masking)."""
+        from airflow.sdk.execution_time.secrets_masker import async_mask_secret
+
+        extra = self._deserialize_extra()
+        if extra:
+            await async_mask_secret(extra)
         return extra
 
     def get_extra_dejson(self) -> dict:

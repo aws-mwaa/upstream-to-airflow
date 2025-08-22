@@ -113,7 +113,7 @@ def mask_secret(secret: JsonValue, name: str | None = None) -> None:
     If ``name`` is provided, then it will only be masked if the name matches one of the configured "sensitive"
     names.
 
-    If ``secret`` is a dict or a iterable (excluding str) then it will be recursively walked and keys with
+    If ``secret`` is a dict or an iterable (excluding str) then it will be recursively walked and keys with
     sensitive names will be hidden.
 
     If the secret value is too short (by default 5 characters or fewer, configurable via the
@@ -129,6 +129,34 @@ def mask_secret(secret: JsonValue, name: str | None = None) -> None:
     if comms := getattr(task_runner, "SUPERVISOR_COMMS", None):
         # Tell the parent, the process which handles all logs writing and output, about the values to mask
         comms.send(MaskSecret(value=secret, name=name))
+
+    _secrets_masker().add_mask(secret, name)
+
+
+async def async_mask_secret(secret: JsonValue, name: str | None = None) -> None:
+    """
+    Async version of mask_secret.
+
+    Mask a secret from appearing in the logs.
+
+    If ``name`` is provided, then it will only be masked if the name matches one of the configured "sensitive"
+    names.
+
+    If ``secret`` is a dict or an iterable (excluding str) then it will be recursively walked and keys with
+    sensitive names will be hidden.
+
+    If the secret value is too short (by default 5 characters or fewer, configurable via the
+    :ref:`[logging] min_length_masked_secret <config:logging__min_length_masked_secret>` setting) it will not
+    be masked
+    """
+    if not secret:
+        return
+
+    from airflow.sdk.execution_time import task_runner
+    from airflow.sdk.execution_time.comms import MaskSecret
+
+    if comms := getattr(task_runner, "SUPERVISOR_COMMS", None):
+        await comms.asend(MaskSecret(value=secret, name=name))
 
     _secrets_masker().add_mask(secret, name)
 
