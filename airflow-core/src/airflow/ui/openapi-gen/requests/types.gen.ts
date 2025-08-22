@@ -2515,6 +2515,7 @@ export type GetMappedTaskInstancesData = {
     startDateLte?: string | null;
     state?: Array<(string)>;
     taskId: string;
+    tryNumber?: Array<(number)>;
     updatedAtGte?: string | null;
     updatedAtLte?: string | null;
     versionNumber?: Array<(number)>;
@@ -2603,6 +2604,7 @@ export type GetTaskInstancesData = {
      */
     taskDisplayNamePattern?: string | null;
     taskId?: string | null;
+    tryNumber?: Array<(number)>;
     updatedAtGte?: string | null;
     updatedAtLte?: string | null;
     versionNumber?: Array<(number)>;
@@ -2939,6 +2941,7 @@ export type GetDagVersionsResponse = DAGVersionCollectionResponse;
 export type UpdateHitlDetailData = {
     dagId: string;
     dagRunId: string;
+    mapIndex?: number;
     requestBody: UpdateHITLDetailPayload;
     taskId: string;
 };
@@ -2948,29 +2951,11 @@ export type UpdateHitlDetailResponse = HITLDetailResponse;
 export type GetHitlDetailData = {
     dagId: string;
     dagRunId: string;
+    mapIndex?: number;
     taskId: string;
 };
 
 export type GetHitlDetailResponse = HITLDetail;
-
-export type UpdateMappedTiHitlDetailData = {
-    dagId: string;
-    dagRunId: string;
-    mapIndex: number;
-    requestBody: UpdateHITLDetailPayload;
-    taskId: string;
-};
-
-export type UpdateMappedTiHitlDetailResponse = HITLDetailResponse;
-
-export type GetMappedTiHitlDetailData = {
-    dagId: string;
-    dagRunId: string;
-    mapIndex: number;
-    taskId: string;
-};
-
-export type GetMappedTiHitlDetailResponse = HITLDetail;
 
 export type GetHitlDetailsData = {
     /**
@@ -5999,62 +5984,6 @@ export type $OpenApiTs = {
         };
         get: {
             req: GetHitlDetailData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: HITLDetail;
-                /**
-                 * Unauthorized
-                 */
-                401: HTTPExceptionResponse;
-                /**
-                 * Forbidden
-                 */
-                403: HTTPExceptionResponse;
-                /**
-                 * Not Found
-                 */
-                404: HTTPExceptionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
-    '/api/v2/hitlDetails/{dag_id}/{dag_run_id}/{task_id}/{map_index}': {
-        patch: {
-            req: UpdateMappedTiHitlDetailData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: HITLDetailResponse;
-                /**
-                 * Unauthorized
-                 */
-                401: HTTPExceptionResponse;
-                /**
-                 * Forbidden
-                 */
-                403: HTTPExceptionResponse;
-                /**
-                 * Not Found
-                 */
-                404: HTTPExceptionResponse;
-                /**
-                 * Conflict
-                 */
-                409: HTTPExceptionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-        get: {
-            req: GetMappedTiHitlDetailData;
             res: {
                 /**
                  * Successful Response
