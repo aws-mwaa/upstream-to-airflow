@@ -136,6 +136,18 @@ def slack_webhook_connections():
             schema="https",
             host="hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
         ),
+        Connection(
+            conn_id="conn_with_timeout",
+            conn_type=CONN_TYPE,
+            password=TEST_TOKEN,
+            extra=json.dumps({"timeout": 30}),
+        ),
+        Connection(
+            conn_id="conn_with_proxy",
+            conn_type=CONN_TYPE,
+            password=TEST_TOKEN,
+            extra=json.dumps({"proxy": "http://proxy.example.com"}),
+        ),
     ]
     with pytest.MonkeyPatch.context() as mp:
         for conn in connections:
@@ -546,6 +558,29 @@ class TestSlackWebhookHook:
             params = hook._get_conn_params()
             assert "proxy" not in params
 
+    @pytest.mark.parametrize(
+        "conn_id,expected_extras",
+        [
+            pytest.param(
+                "conn_with_timeout",
+                {"timeout": 30},
+                id="connection-with-timeout",
+            ),
+            pytest.param(
+                "conn_with_proxy",
+                {"proxy": "http://proxy.example.com"},
+                id="connection-with-proxy",
+            ),
+        ],
+    )
+    def test_conn_params_extra_processing(self, conn_id, expected_extras):
+        """Test connection parameters properly include extras."""
+        hook = SlackWebhookHook(slack_webhook_conn_id=conn_id)
+        params = hook._get_conn_params()
+
+        for key, value in expected_extras.items():
+            assert params[key] == value
+
 
 class TestSlackWebhookHookAsync:
     @pytest.mark.asyncio
@@ -634,3 +669,41 @@ class TestSlackWebhookHookAsync:
 
         assert resp == MOCK_WEBHOOK_RESPONSE
         mock_async_send_dict.assert_called_once_with(body=send_params, headers=headers)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "conn_id,expected_extras",
+        [
+            pytest.param(
+                "conn_with_timeout",
+                {"timeout": 30},
+                id="connection-with-timeout",
+            ),
+            pytest.param(
+                "conn_with_proxy",
+                {"proxy": "http://proxy.example.com"},
+                id="connection-with-proxy",
+            ),
+        ],
+    )
+    @mock.patch("airflow.providers.slack.hooks.slack_webhook.SlackWebhookHook.aget_connection")
+    async def test_async_conn_params_extra_processing(self, mock_aget_connection, conn_id, expected_extras):
+        """Test async connection parameters properly include extras."""
+        connection = Connection(
+            conn_id=conn_id,
+            conn_type=CONN_TYPE,
+            password=TEST_TOKEN,
+            extra=json.dumps(expected_extras),
+        )
+        connection.async_extra_dejson = mock.AsyncMock(return_value=expected_extras)
+        mock_aget_connection.return_value = connection
+
+        hook = SlackWebhookHook(slack_webhook_conn_id=conn_id)
+        params = await hook._async_get_conn_params()
+
+        for key, value in expected_extras.items():
+            assert params[key] == value
+
+        # Verify the async method was called
+        connection.async_extra_dejson.assert_called_once()
+        mock_aget_connection.assert_called_once_with(conn_id)

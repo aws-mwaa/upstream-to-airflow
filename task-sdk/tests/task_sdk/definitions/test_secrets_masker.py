@@ -25,14 +25,16 @@ import sys
 import textwrap
 from enum import Enum
 from io import StringIO
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from airflow.models import Connection
+from airflow.sdk.execution_time.comms import MaskSecret
 from airflow.sdk.execution_time.secrets_masker import (
     RedactedIO,
     SecretsMasker,
+    async_mask_secret,
     mask_secret,
     merge,
     redact,
@@ -402,6 +404,80 @@ class TestSecretsMasker:
 
             got = redact(val)
             assert got == val
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("name", "value", "expected_mask"),
+        [
+            (None, "secret", {"secret"}),
+            ("apikey", "secret", {"secret"}),
+            # the value for "apikey", and "password" should end up masked
+            (None, {"apikey": "secret", "other": {"val": "innocent", "password": "***"}}, {"secret"}),
+            (None, ["secret", "other"], {"secret", "other"}),
+            # When the "sensitive value" is a dict, don't mask anything
+            # (Or should this be mask _everything_ under it ?
+            ("api_key", {"other": "innocent"}, set()),
+            (None, {"password": ""}, set()),
+            (None, "", set()),
+        ],
+    )
+    async def test_async_mask_secret(self, name, value, expected_mask):
+        """Test that async_mask_secret correctly adds patterns to the masker."""
+        masker = SecretsMasker()
+        with patch("airflow.sdk.execution_time.secrets_masker._secrets_masker", return_value=masker):
+            await async_mask_secret(value, name)
+            assert masker.patterns == expected_mask
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "secret,name",
+        [
+            ("secret_value", "api_key"),
+            ({"password": "secret"}, None),
+        ],
+    )
+    async def test_async_mask_secret_with_supervisor(self, secret, name, mock_supervisor_comms):
+        """Test that async_mask_secret sends message to supervisor when available."""
+        from airflow.sdk.execution_time.secrets_masker import SecretsMasker, async_mask_secret
+
+        mock_supervisor_comms.asend = AsyncMock()
+        masker = SecretsMasker()
+
+        with patch("airflow.sdk.execution_time.secrets_masker._secrets_masker", return_value=masker):
+            await async_mask_secret(secret, name)
+            mock_supervisor_comms.asend.assert_called_once_with(MaskSecret(value=secret, name=name))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "secret,name",
+        [
+            ("secret_value", "api_key"),
+            ({"password": "secret"}, None),
+        ],
+    )
+    async def test_async_mask_secret_without_supervisor(self, secret, name, mock_supervisor_comms):
+        """Test that async_mask_secret works when supervisor comms not available."""
+        from airflow.sdk.execution_time.secrets_masker import SecretsMasker, async_mask_secret
+
+        masker = SecretsMasker()
+        mock_supervisor_comms.SUPERVISOR_COMMS = None
+
+        with patch("airflow.sdk.execution_time.secrets_masker._secrets_masker", return_value=masker):
+            await async_mask_secret(secret, name)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "empty_secret",
+        [None, "", {}],
+    )
+    async def test_async_mask_secret_empty_secret(self, empty_secret, mock_supervisor_comms):
+        """Test that async_mask_secret returns early for empty secrets."""
+        from airflow.sdk.execution_time.secrets_masker import async_mask_secret
+
+        mock_supervisor_comms.asend = AsyncMock()
+
+        await async_mask_secret(empty_secret, "test_name")
+        mock_supervisor_comms.asend.assert_not_called()
 
 
 class TestShouldHideValueForKey:
