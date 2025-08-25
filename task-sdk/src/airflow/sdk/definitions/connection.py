@@ -225,7 +225,7 @@ class Connection:
     @property
     def extra_dejson(self) -> dict:
         """Returns the extra property by deserializing json."""
-        from airflow.sdk.execution_time.secrets_masker import mask_secret
+        from airflow.sdk.log import mask_secret
 
         extra = self._deserialize_extra()
         if extra:
@@ -234,7 +234,7 @@ class Connection:
 
     async def async_extra_dejson(self) -> dict:
         """Return the extra property by deserializing json (with async secret masking)."""
-        from airflow.sdk.execution_time.secrets_masker import async_mask_secret
+        from airflow.sdk.log import async_mask_secret
 
         extra = self._deserialize_extra()
         if extra:
