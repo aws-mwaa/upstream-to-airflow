@@ -63,6 +63,8 @@ def import_all_models():
     import airflow.models.dag_favorite
     import airflow.models.dag_version
     import airflow.models.dagbundle
+    # TODO: verify if this is required
+    import airflow.models.dag_bundle_version_manifest
     import airflow.models.dagwarning
     import airflow.models.errors
     import airflow.models.serialized_dag

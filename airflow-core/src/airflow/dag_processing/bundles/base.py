@@ -18,10 +18,13 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
+import json
 import logging
 import os
 import shutil
 import tempfile
+import uuid
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -171,6 +174,24 @@ class BundleUsageTrackingManager:
                 shutil.rmtree(bundle_version_path)
                 # remove the lock file
                 os.remove(info.lock_file_path)
+                
+                # Also remove the associated version manifest if it exists
+                try:
+                    from airflow.models.dag_bundle_version_manifest import DagBundleVersionManifest
+                    from airflow.utils.session import create_session
+                    
+                    with create_session() as session:
+                        manifest = session.get(DagBundleVersionManifest, (bundle_name, info.version))
+                        if manifest:
+                            session.delete(manifest)
+                            session.commit()
+                            log.debug("removed manifest for bundle=%s version=%s", bundle_name, info.version)
+                        
+                except Exception as e:
+                    log.warning("failed to remove manifest for bundle=%s version=%s: %s", 
+                              bundle_name, info.version, e)
+                    # Don't fail the entire cleanup if manifest removal fails
+                
         except BlockingIOError:
             log_info("could not obtain lock. stale bundle will not be removed.")
             return
@@ -250,6 +271,7 @@ class BaseDagBundle(ABC):
     """
 
     supports_versioning: bool = False
+    supports_manifest_versioning: bool = False
 
     _locked: bool = False
 
@@ -362,6 +384,74 @@ class BaseDagBundle(ABC):
         :return: URL template string or None if not applicable
         """
         return self._view_url_template
+
+    def create_version_manifest(self) -> dict | None:
+        """
+        Create a manifest that describes the current state of the bundle.
+
+        This method should be implemented by bundle types that support manifest versioning.
+        The manifest should contain all information needed to recreate this exact version
+        of the bundle later.
+
+        :return: Manifest data as a dictionary, or None if manifest versioning is not supported
+        """
+        if not self.supports_manifest_versioning:
+            return None
+        raise NotImplementedError("Bundle supports manifest versioning but does not implement create_version_manifest")
+
+    def store_version_manifest(self, version_id: str, manifest_data: dict) -> None:
+        """
+        Store a version manifest in the database.
+
+        :param version_id: The version ID to store the manifest under
+        :param manifest_data: The manifest data dictionary
+        """
+        if not self.supports_manifest_versioning:
+            raise RuntimeError("Bundle does not support manifest versioning")
+
+        # Import here to avoid circular imports
+        from airflow.models.dag_bundle_version_manifest import DagBundleVersionManifest
+
+        DagBundleVersionManifest.store_manifest(
+            bundle_name=self.name,
+            version_id=version_id,
+            manifest_data=manifest_data,
+        )
+
+    def get_version_manifest(self, version_id: str) -> dict | None:
+        """
+        Retrieve a version manifest from the database.
+
+        :param version_id: The version ID to look up
+        :return: The manifest data dictionary, or None if not found
+        """
+        if not self.supports_manifest_versioning:
+            return None
+
+        # Import here to avoid circular imports
+        from airflow.models.dag_bundle_version_manifest import DagBundleVersionManifest
+
+        manifest_record = DagBundleVersionManifest.get_manifest(
+            bundle_name=self.name,
+            version_id=version_id,
+        )
+        
+        return manifest_record.manifest_data if manifest_record else None
+
+    def recreate_version_from_manifest(self, version_id: str, target_path: Path) -> None:
+        """
+        Recreate a specific version of the bundle from its stored manifest.
+
+        This method should be implemented by bundle types that support manifest versioning.
+        It should use the manifest data to download/recreate the exact state described
+        by the manifest.
+
+        :param version_id: The version ID to recreate
+        :param target_path: The local path where the version should be recreated
+        """
+        if not self.supports_manifest_versioning:
+            raise RuntimeError("Bundle does not support manifest versioning")
+        raise NotImplementedError("Bundle supports manifest versioning but does not implement recreate_version_from_manifest")
 
     @contextmanager
     def lock(self):
