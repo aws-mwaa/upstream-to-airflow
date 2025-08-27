@@ -197,6 +197,25 @@ class Deadline(Base):
     def callback(self) -> Callback:
         return cast("Callback", deserialize(self._callback))
 
+    def fetch_context(self, session):
+        from airflow.sdk.api.datamodels._generated import TIRunContext
+        from airflow.sdk.execution_time.task_runner import RuntimeTaskInstance
+
+        dag = self.dagrun.get_dag()
+        last_ti = self.dagrun.get_last_ti(dag=dag, session=session)
+        task = dag.get_task(last_ti.task_id)
+        runtime_ti = RuntimeTaskInstance.model_construct(
+            **last_ti.model_dump(exclude_unset=True),
+            task=task,
+            _ti_context_from_server=TIRunContext.model_construct(
+                dag_run=self.dag_run,
+                max_tries=task.retries,
+            ),
+        )
+        context = runtime_ti.get_template_context()
+        context["reason"] = "deadline_miss"
+        return context
+
     def handle_miss(self, session: Session):
         """Handle a missed deadline by running the callback in the appropriate host and updating the `callback_state`."""
         from airflow.sdk.definitions.deadline import AsyncCallback, SyncCallback
@@ -204,7 +223,7 @@ class Deadline(Base):
         if isinstance(self.callback, AsyncCallback):
             callback_trigger = DeadlineCallbackTrigger(
                 callback_path=self.callback.path,
-                callback_kwargs=self.callback.kwargs,
+                callback_kwargs=self.callback.kwargs | {"context": self.fetch_context(session)},
             )
             trigger_orm = Trigger.from_object(callback_trigger)
             session.add(trigger_orm)
