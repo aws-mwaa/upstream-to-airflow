@@ -28,6 +28,7 @@ from contextlib import contextmanager
 from enum import Enum
 from functools import partial
 
+import boto3
 from botocore.exceptions import ClientError
 from botocore.signers import RequestSigner
 
@@ -79,6 +80,10 @@ class NodegroupStates(Enum):
 
 COMMAND = """
             export PYTHON_OPERATORS_VIRTUAL_ENV_MODE=1
+            export AWS_ACCESS_KEY_ID="{access_key}"
+            export AWS_SECRET_ACCESS_KEY="{secret_access_key}"
+            export AWS_SESSION_TOKEN="{session_token}"
+            export AWS_DEFAULT_REGION="{default_region}"
             output=$({python_executable} -m airflow.providers.amazon.aws.utils.eks_get_token \
                 --cluster-name {eks_cluster_name} {args} 2>&1)
 
@@ -553,14 +558,13 @@ class EksHook(AwsBaseHook):
         if self.region_name is not None:
             args = args + f" --region-name {self.region_name}"
 
-        if self.aws_conn_id is not None:
-            args = args + f" --aws-conn-id {self.aws_conn_id}"
-
         # We need to determine which python executable the host is running in order to correctly
         # call the eks_get_token.py script.
         python_executable = f"python{sys.version_info[0]}.{sys.version_info[1]}"
         # Set up the client
         eks_client = self.conn
+        session = self.get_session()
+        credentials = session.get_credentials().get_frozen_credentials()
 
         # Get cluster details
         cluster = eks_client.describe_cluster(name=eks_cluster_name)
@@ -598,6 +602,9 @@ class EksHook(AwsBaseHook):
                             "args": [
                                 "-c",
                                 COMMAND.format(
+                                    access_key=credentials.access_key,
+                                    secret_access_key=credentials.secret_key,
+                                    session_token=credentials.token,
                                     python_executable=python_executable,
                                     eks_cluster_name=eks_cluster_name,
                                     args=args,
@@ -617,7 +624,8 @@ class EksHook(AwsBaseHook):
             yield config_file.name
 
     def fetch_access_token_for_cluster(self, eks_cluster_name: str) -> str:
-        session = self.get_session()
+        # This will use the credentials from the caller set as the standard AWS env variables
+        session = boto3.Session()
         service_id = self.conn.meta.service_model.service_id
         # This env variable is required so that we get a regionalized endpoint for STS in regions that
         # otherwise default to global endpoints. The mechanism below to generate the token is very picky that

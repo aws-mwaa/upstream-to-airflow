@@ -38,13 +38,6 @@ def get_parser():
         "--cluster-name", help="The name of the cluster to generate kubeconfig file for.", required=True
     )
     parser.add_argument(
-        "--aws-conn-id",
-        help=(
-            "The Airflow connection used for AWS credentials. "
-            "If not specified or empty then the default boto3 behaviour is used."
-        ),
-    )
-    parser.add_argument(
         "--region-name", help="AWS region_name. If not specified then the default boto3 behaviour is used."
     )
 
