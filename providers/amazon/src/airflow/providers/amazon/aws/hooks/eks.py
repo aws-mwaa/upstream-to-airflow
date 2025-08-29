@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import sys
@@ -28,16 +27,13 @@ from contextlib import contextmanager
 from enum import Enum
 from functools import partial
 
-import boto3
 from botocore.exceptions import ClientError
-from botocore.signers import RequestSigner
 
 from airflow.providers.amazon.aws.hooks.base_aws import AwsBaseHook
 from airflow.providers.amazon.aws.hooks.sts import StsHook
 from airflow.utils import yaml
 
 DEFAULT_PAGINATION_TOKEN = ""
-STS_TOKEN_EXPIRES_IN = 60
 AUTHENTICATION_API_VERSION = "client.authentication.k8s.io/v1alpha1"
 _POD_USERNAME = "aws"
 _CONTEXT_NAME = "aws"
@@ -83,9 +79,8 @@ COMMAND = """
             export AWS_ACCESS_KEY_ID="{access_key}"
             export AWS_SECRET_ACCESS_KEY="{secret_access_key}"
             export AWS_SESSION_TOKEN="{session_token}"
-            export AWS_DEFAULT_REGION="{default_region}"
             output=$({python_executable} -m airflow.providers.amazon.aws.utils.eks_get_token \
-                --cluster-name {eks_cluster_name} {args} 2>&1)
+                --cluster-name {eks_cluster_name} --sts-url '{sts_url}' {args} 2>&1)
 
             status=$?
 
@@ -571,6 +566,12 @@ class EksHook(AwsBaseHook):
         cluster_cert = cluster["cluster"]["certificateAuthority"]["data"]
         cluster_ep = cluster["cluster"]["endpoint"]
 
+        os.environ["AWS_STS_REGIONAL_ENDPOINTS"] = "regional"
+        try:
+            sts_url = f"{StsHook(region_name=session.region_name).conn_client_meta.endpoint_url}/?Action=GetCallerIdentity&Version=2011-06-15"
+        finally:
+            del os.environ["AWS_STS_REGIONAL_ENDPOINTS"]
+
         cluster_config = {
             "apiVersion": "v1",
             "kind": "Config",
@@ -605,6 +606,7 @@ class EksHook(AwsBaseHook):
                                     access_key=credentials.access_key,
                                     secret_access_key=credentials.secret_key,
                                     session_token=credentials.token,
+                                    sts_url=sts_url,
                                     python_executable=python_executable,
                                     eks_cluster_name=eks_cluster_name,
                                     args=args,
@@ -622,45 +624,3 @@ class EksHook(AwsBaseHook):
             config_file.write(config_text)
             config_file.flush()
             yield config_file.name
-
-    def fetch_access_token_for_cluster(self, eks_cluster_name: str) -> str:
-        # This will use the credentials from the caller set as the standard AWS env variables
-        session = boto3.Session()
-        service_id = self.conn.meta.service_model.service_id
-        # This env variable is required so that we get a regionalized endpoint for STS in regions that
-        # otherwise default to global endpoints. The mechanism below to generate the token is very picky that
-        # the endpoint is regional.
-        os.environ["AWS_STS_REGIONAL_ENDPOINTS"] = "regional"
-        try:
-            sts_url = f"{StsHook(region_name=session.region_name).conn_client_meta.endpoint_url}/?Action=GetCallerIdentity&Version=2011-06-15"
-        finally:
-            del os.environ["AWS_STS_REGIONAL_ENDPOINTS"]
-
-        signer = RequestSigner(
-            service_id=service_id,
-            region_name=session.region_name,
-            signing_name="sts",
-            signature_version="v4",
-            credentials=session.get_credentials(),
-            event_emitter=session.events,
-        )
-
-        request_params = {
-            "method": "GET",
-            "url": sts_url,
-            "body": {},
-            "headers": {"x-k8s-aws-id": eks_cluster_name},
-            "context": {},
-        }
-
-        signed_url = signer.generate_presigned_url(
-            request_dict=request_params,
-            region_name=session.region_name,
-            expires_in=STS_TOKEN_EXPIRES_IN,
-            operation_name="",
-        )
-
-        base64_url = base64.urlsafe_b64encode(signed_url.encode("utf-8")).decode("utf-8")
-
-        # remove any base64 encoding padding:
-        return "k8s-aws-v1." + base64_url.rstrip("=")
