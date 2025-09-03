@@ -278,7 +278,7 @@ class StartupDetails(BaseModel):
     dag_rel_path: str
     bundle_info: BundleInfo
     start_date: datetime
-    ti_context: TIRunContext
+    ti_context: TIRunContext #
     type: Literal["StartupDetails"] = "StartupDetails"
 
 
