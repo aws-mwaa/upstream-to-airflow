@@ -137,7 +137,12 @@ class Trigger(Base):
         from airflow.models.crypto import get_fernet
         from airflow.serialization.serialized_objects import BaseSerialization
 
+        # log.info("Before encrypting kwargs: %s", kwargs)
+
         serialized_kwargs = BaseSerialization.serialize(kwargs)
+
+        # log.warning("serde test: %s", BaseSerialization.deserialize(serialized_kwargs))
+
         return get_fernet().encrypt(json.dumps(serialized_kwargs).encode("utf-8")).decode("utf-8")
 
     @staticmethod
@@ -182,7 +187,8 @@ class Trigger(Base):
             .options(
                 selectinload(cls.task_instance)
                 .joinedload(TaskInstance.trigger)
-                .joinedload(Trigger.triggerer_job)
+                # .joinedload(Trigger.triggerer_job),
+                # selectinload(cls.deadline)
             )
         )
         return {obj.id: obj for obj in session.scalars(stmt)}

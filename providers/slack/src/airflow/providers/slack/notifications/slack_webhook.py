@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from airflow.providers.common.compat.notifier import BaseNotifier
 from airflow.providers.slack.hooks.slack_webhook import SlackWebhookHook
+from airflow.sdk import Context
 
 if TYPE_CHECKING:
     from slack_sdk.http_retry import RetryHandler

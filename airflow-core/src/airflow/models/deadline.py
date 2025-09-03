@@ -32,14 +32,17 @@ from sqlalchemy.orm import relationship
 from sqlalchemy_utils import UUIDType
 
 from airflow._shared.timezones import timezone
+from airflow.callbacks.callback_requests import DagRunContext, DagCallbackRequest
 from airflow.models import Trigger
 from airflow.models.base import Base
 from airflow.serialization.serde import deserialize, serialize
 from airflow.settings import json
 from airflow.triggers.deadline import PAYLOAD_STATUS_KEY, DeadlineCallbackTrigger
 from airflow.utils.log.logging_mixin import LoggingMixin
-from airflow.utils.session import provide_session
+from airflow.utils.session import provide_session, NEW_SESSION
 from airflow.utils.sqlalchemy import UtcDateTime
+
+from airflow.api_fastapi.execution_api.datamodels import taskinstance as ti_datamodel  # noqa: TC001
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -198,14 +201,74 @@ class Deadline(Base):
     def callback(self) -> Callback:
         return cast("Callback", deserialize(self._callback))
 
-    def handle_miss(self, session: Session):
+    def get_template_context(self, dag, session):
+        from airflow.sdk.api.datamodels._generated import TIRunContext
+        from airflow.sdk.execution_time.task_runner import RuntimeTaskInstance
+        from airflow.api_fastapi.execution_api.datamodels.taskinstance  import TaskInstance as TIDataModel
+        # from airflow.models import DagRun
+
+        # session.flush()
+        # session.merge(self)
+        # session.refresh(self)
+        # session.refresh(self.dagrun)
+        # deadline = session.get(cls, deadline_id)
+        # dagrun = session.get(DagRun, self.dagrun_id)
+        # dagrun = deadline.dagrun
+        dagrun = self.dagrun
+        # dag = self.dagrun.get_dag()
+        # dag = dag_bag.get_dag(dagrun.dag_id)
+        last_ti = TIDataModel.model_validate(dagrun.get_last_ti(dag=dag, session=session), from_attributes=True)
+        task = dag.get_task(last_ti.task_id)
+        runtime_ti = RuntimeTaskInstance.model_construct(
+            **last_ti.model_dump(exclude_unset=True),
+            task=task,
+            _ti_context_from_server=TIRunContext.model_construct(
+                dag_run=dagrun,
+                max_tries=task.retries,
+            ),
+        )
+        context = runtime_ti.get_template_context()
+        context["reason"] = "deadline_miss"
+        logger.warning("context: %s", context)
+        return context
+
+    def handle_miss(self, dag, session: Session):
         """Handle a missed deadline by running the callback in the appropriate host and updating the `callback_state`."""
         from airflow.sdk.definitions.deadline import AsyncCallback, SyncCallback
 
         if isinstance(self.callback, AsyncCallback):
+            context = self.get_template_context(dag, session).items()
+            ser_context = {}
+            exceptions = []
+            for k, v in context:
+                try:
+                    ser_context[k] = json.dumps(v)
+                except Exception as e:
+                    exceptions.append((v, str(e)))
+
+            logger.error(ser_context)
             callback_trigger = DeadlineCallbackTrigger(
                 callback_path=self.callback.path,
-                callback_kwargs=self.callback.kwargs,
+                callback_kwargs=self.callback.kwargs | {"context": ser_context},
+                # callback_kwargs=self.callback.kwargs | {"context": {"a":"b"}},
+                # callback_kwargs=self.callback.kwargs,
+                # request=DagCallbackRequest(
+                #     dag_id="dag.dag_id",
+                #     run_id="self.dagrun.run_id",
+                #     bundle_name="name",
+                #     bundle_version="version",
+                #     msg="msg",
+                #     filepath="filepath",
+                #     is_failure_callback=False,
+                #     context_from_server=DagRunContext(
+                #         dag_run=self.dagrun,
+                #         last_ti=self.dagrun.get_last_ti(dag=dag, session=session)
+                #     )
+                # ),
+                # context_from_server=DagRunContext(
+                #     dag_run=self.dagrun,
+                #     last_ti=self.dagrun.get_last_ti(dag=dag, session=session)
+                # )
             )
             trigger_orm = Trigger.from_object(callback_trigger)
             session.add(trigger_orm)

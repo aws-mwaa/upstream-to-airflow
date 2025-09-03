@@ -320,6 +320,37 @@ def in_process_api_server() -> InProcessExecutionAPI:
     api = InProcessExecutionAPI()
     return api
 
+# @provide_session
+# def get_deadline_template_context(deadline_id, dag_bag, session: Session = NEW_SESSION):
+#     from airflow.sdk.api.datamodels._generated import TIRunContext
+#     from airflow.sdk.execution_time.task_runner import RuntimeTaskInstance
+#     from airflow.api_fastapi.execution_api.datamodels.taskinstance  import TaskInstance as TIDataModel
+#     from airflow.models import Deadline
+#
+#     # session.flush()
+#     # session.merge(self)
+#     # session.refresh(self)
+#     # session.refresh(self.dagrun)
+#     deadline = session.get(Deadline, deadline_id)
+#     # dagrun = session.get(DagRun, self.dagrun_id)
+#     dagrun = deadline.dagrun
+#     # dag = self.dagrun.get_dag()
+#     dag = dag_bag.get_dag(dagrun.dag_id)
+#     last_ti = TIDataModel.model_validate(dagrun.get_last_ti(dag=dag, session=session), from_attributes=True)
+#     task = dag.get_task(last_ti.task_id)
+#     runtime_ti = RuntimeTaskInstance.model_construct(
+#         **last_ti.model_dump(exclude_unset=True),
+#         task=task,
+#         _ti_context_from_server=TIRunContext.model_construct(
+#             dag_run=dagrun,
+#             max_tries=task.retries,
+#         ),
+#     )
+#     context = runtime_ti.get_template_context()
+#     context["reason"] = "deadline_miss"
+#     logger.warning("context: %s", context)
+#     return context
+
 
 @attrs.define(kw_only=True)
 class TriggerRunnerSupervisor(WatchedSubprocess):
@@ -605,6 +636,57 @@ class TriggerRunnerSupervisor(WatchedSubprocess):
         trigger set.
         """
         render_log_fname = log_filename_template_renderer()
+        # dag_bag = DagBag(collect_dags=False)
+        #
+        # def expand_start_trigger_args(trigger: Trigger) -> Trigger:
+        #     task = dag_bag.get_dag(trigger.task_instance.dag_id).get_task(trigger.task_instance.task_id)
+        #     if task.template_fields:
+        #         trigger.task_instance.refresh_from_task(task)
+        #         context = trigger.task_instance.get_template_context()
+        #         task.render_template_fields(context=context)
+        #         start_trigger_args = task.expand_start_trigger_args(context=context)
+        #         if start_trigger_args:
+        #             trigger.kwargs = start_trigger_args.trigger_kwargs
+        #     return trigger
+        #
+        # def create_workload(trigger: Trigger) -> workloads.RunTrigger:
+        #     if trigger.task_instance:
+        #         log_path = render_log_fname(ti=trigger.task_instance)
+        #
+        #         trigger = expand_start_trigger_args(trigger)
+        #
+        #         ser_ti = workloads.TaskInstance.model_validate(trigger.task_instance, from_attributes=True)
+        #         # When producing logs from TIs, include the job id producing the logs to disambiguate it.
+        #         self.logger_cache[new_id] = TriggerLoggingFactory(
+        #             log_path=f"{log_path}.trigger.{self.job.id}.log",
+        #             ti=ser_ti,  # type: ignore
+        #         )
+        #
+        #         return workloads.RunTrigger(
+        #             classpath=trigger.classpath,
+        #             id=new_id,
+        #             encrypted_kwargs=trigger.encrypted_kwargs,
+        #             ti=ser_ti,
+        #             timeout_after=trigger.task_instance.trigger_timeout,
+        #         )
+        #
+        #     elif trigger.deadline:
+        #         # # from airflow.models import Deadline
+        #         # # Explicitly setting the kwargs of the trigger is required instead of modifying trigger.kwargs
+        #         # # directly so that the property setter is used, which is responsible for encrypting the kwargs
+        #         # kwargs = trigger.kwargs
+        #         # # kwargs['callback_kwargs']['context'] = trigger.deadline.get_template_context(dag_bag)
+        #         # # kwargs['callback_kwargs']['context'] = get_deadline_template_context(trigger.deadline.id, dag_bag)
+        #         # kwargs['callback_kwargs']['context'] = {"a": "b"}
+        #         # trigger.kwargs = kwargs
+        #         trigger.context = {"a": "b"}
+        #
+        #     return workloads.RunTrigger(
+        #         classpath=trigger.classpath,
+        #         id=new_id,
+        #         encrypted_kwargs=trigger.encrypted_kwargs,
+        #         ti=None,
+        #     )
 
         known_trigger_ids = (
             self.running_triggers.union(x[0] for x in self.events)

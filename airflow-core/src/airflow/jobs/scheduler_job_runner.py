@@ -1313,7 +1313,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                         .where(Deadline.deadline_time < datetime.now(timezone.utc))
                         .where(Deadline.callback_state.is_(None))
                     ):
-                        deadline.handle_miss(session)
+                        deadline.handle_miss(self.scheduler_dag_bag.get_dag_for_run(dag_run=deadline.dagrun, session=session), session)
 
                 # Heartbeat the scheduler periodically
                 perform_heartbeat(
