@@ -1295,7 +1295,10 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                         .where(Deadline.deadline_time < datetime.now(timezone.utc))
                         .where(~Deadline.missed)
                     ):
-                        deadline.handle_miss(session)
+                        callback = deadline.handle_miss(session)
+                        if callback:
+                            workload = workloads.ExecuteCallback.make(callback, generator=executor.jwt_generator)
+                            executor.queue_workload(workload, session=session)
 
                 # Heartbeat the scheduler periodically
                 perform_heartbeat(

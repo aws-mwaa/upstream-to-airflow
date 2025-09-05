@@ -111,6 +111,7 @@ class TriggererCallback(Callback):
             )
         )
         super().queue(session)
+        return False
 
     def handle_callback_event(self, event: TriggerEvent, session: Session):
         status = event.payload.get(PAYLOAD_STATUS_KEY)
@@ -136,6 +137,9 @@ class ExecutorCallback(Callback):
     def __init__(self, callback_def: SyncCallback):
         super().__init__(data=callback_def.serialize())
 
+    def queue(self, session: Session):
+        super().queue(session)
+        return True
 
 def create_callback_from_sdk_def(callback_def: TaskSdkCallback) -> Callback:
     from airflow.sdk.definitions.deadline import AsyncCallback, SyncCallback

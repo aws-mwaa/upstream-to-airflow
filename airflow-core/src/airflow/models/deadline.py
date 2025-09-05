@@ -175,9 +175,10 @@ class Deadline(Base):
 
     def handle_miss(self, session: Session):
         self.missed = True
-        self.callback.queue(session)
+        needs_to_be_queued = self.callback.queue(session)
         session.add(self)
-
+        if needs_to_be_queued:
+            return self.callback
 
 class ReferenceModels:
     """
