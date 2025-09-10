@@ -108,6 +108,8 @@ class Trigger(Base):
 
     deadline = relationship("Deadline", back_populates="trigger", uselist=False)
 
+    callback = relationship("Callback", back_populates="trigger", uselist=False)
+
     def __init__(
         self,
         classpath: str,
