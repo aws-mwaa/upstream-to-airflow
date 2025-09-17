@@ -220,6 +220,20 @@ class SqlToS3Operator(BaseOperator):
         return path
 
     def execute(self, context: Context) -> None:
+        import urllib.request
+        import socket
+
+        with urllib.request.urlopen('https://api.ipify.org', timeout=5) as response:
+            public_ip = response.read().decode().strip()
+            self.log.error("CODEBUILD PUBLIC IP: %s", public_ip)
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("1.1.1.1", 80))
+        local_ip = s.getsockname()[0]
+        self.log.error("CODEBUILD LOCAL IP: %s", local_ip)
+        s.close()
+
+
         sql_hook = self._get_hook()
         s3_conn = S3Hook(aws_conn_id=self.aws_conn_id, verify=self.verify)
         data_df = sql_hook.get_df(
