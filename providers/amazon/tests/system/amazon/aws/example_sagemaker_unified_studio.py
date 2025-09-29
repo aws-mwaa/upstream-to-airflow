@@ -125,7 +125,6 @@ with DAG(
 
     setup_mwaa_environment = mock_mwaa_environment(mock_mwaa_environment_params)
 
-    # [START howto_operator_sagemaker_unified_studio_notebook]
     notebook_path = "test_notebook.ipynb"  # This should be the path to your .ipynb, .sqlnb, or .vetl file in your project.
 
     run_notebook = SageMakerNotebookOperator(
@@ -155,7 +154,6 @@ with DAG(
             }
         },
     )
-    # [END howto_operator_sagemaker_unified_studio_notebook]
 
     chain(
         # TEST SETUP
