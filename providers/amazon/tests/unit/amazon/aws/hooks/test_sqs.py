@@ -26,8 +26,25 @@ from airflow.providers.amazon.aws.hooks.sqs import SqsHook
 
 QUEUE_URL = "https://sqs.region.amazonaws.com/123456789/test-queue"
 MESSAGE_BODY = "test message"
+DELAY = 5
+DEDUPE = "banana"
+MSG_ATTRIBUTES = {
+    "Author": {
+        "StringValue": "test-user",
+        "DataType": "String",
+    },
+    "Priority": {
+        "StringValue": "1",
+        "DataType": "Number",
+    },
+}
 
 MESSAGE_ID_KEY = "MessageId"
+
+SEND_MESSAGE_DEFAULTS = {
+    "DelaySeconds": 0,
+    "MessageAttributes": {},
+}
 
 
 class TestSqsHook:
@@ -67,7 +84,28 @@ class TestAsyncSqsHook:
         async_conn = await hook.get_async_conn()
         assert async_conn is mock_async_client
 
-    async def test_asend_message(self, hook, mock_get_async_conn, mock_async_client):
+    async def test_asend_message_minimal(self, hook, mock_get_async_conn, mock_async_client):
         response = await hook.asend_message(queue_url=QUEUE_URL, message_body=MESSAGE_BODY)
 
         assert MESSAGE_ID_KEY in response
+        mock_async_client.send_message.assert_called_once_with(
+            MessageBody=MESSAGE_BODY, QueueUrl=QUEUE_URL, **SEND_MESSAGE_DEFAULTS
+        )
+
+    async def test_asend_message_with_attributes(self, hook, mock_get_async_conn, mock_async_client):
+        response = await hook.asend_message(
+            queue_url=QUEUE_URL,
+            message_body=MESSAGE_BODY,
+            message_attributes=MSG_ATTRIBUTES,
+            delay_seconds=DELAY,
+            message_deduplication_id=DEDUPE,
+        )
+
+        assert MESSAGE_ID_KEY in response
+        mock_async_client.send_message.assert_called_once_with(
+            DelaySeconds=DELAY,
+            MessageBody=MESSAGE_BODY,
+            MessageAttributes=MSG_ATTRIBUTES,
+            QueueUrl=QUEUE_URL,
+            MessageDeduplicationId=DEDUPE,
+        )
