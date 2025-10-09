@@ -536,6 +536,7 @@ export type DAGDetailsResponse = {
     owner_links?: {
     [key: string]: (string);
 } | null;
+    is_favorite?: boolean;
     /**
      * Return file token.
      */
@@ -1802,6 +1803,7 @@ export type DAGWithLatestDagRunsResponse = {
 } | null;
     latest_dag_runs: Array<DAGRunResponse>;
     pending_actions: Array<HITLDetail>;
+    is_favorite: boolean;
     /**
      * Return file token.
      */
