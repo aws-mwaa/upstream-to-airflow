@@ -65,6 +65,7 @@ from airflow.models.asset import (
     TaskOutletAssetReference,
 )
 from airflow.models.backfill import Backfill
+from airflow.models.callback import Callback, ExecutorCallback
 from airflow.models.dag import DagModel, get_next_data_interval, get_run_data_interval
 from airflow.models.dag_version import DagVersion
 from airflow.models.dagbag import DBDagBag
@@ -1365,13 +1366,21 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
                 with create_session() as session:
                     # Only retrieve expired deadlines that haven't been processed yet.
-                    # `callback_state` is null/None by default until the handler set it.
+                    # `missed` is False by default until the handler sets it.
                     for deadline in session.scalars(
                         select(Deadline)
                         .where(Deadline.deadline_time < datetime.now(timezone.utc))
-                        .where(Deadline.callback_state.is_(None))
+                        .where(~Deadline.missed)
                     ):
                         deadline.handle_miss(session)
+
+                        # Check if the deadline's callback is meant to run on the executor. Other kinds of
+                        # callbacks are taken care of elsewhere
+                        if isinstance(deadline.callback, ExecutorCallback):
+                            workload = workloads.ExecuteCallback.make(
+                                deadline.callback, dag_run=deadline.dagrun, generator=executor.jwt_generator
+                            )
+                            executor.queue_workload(workload, session=session)
 
                 # Heartbeat the scheduler periodically
                 perform_heartbeat(
@@ -2481,7 +2490,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             delete(Trigger)
             .where(
                 Trigger.id.not_in(select(AssetWatcherModel.trigger_id)),
-                Trigger.id.not_in(select(Deadline.trigger_id)),
+                Trigger.id.not_in(select(Callback.trigger_id)),
                 Trigger.id.not_in(select(TaskInstance.trigger_id)),
             )
             .execution_options(synchronize_session="fetch")

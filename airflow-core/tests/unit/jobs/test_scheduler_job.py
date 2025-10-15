@@ -54,12 +54,13 @@ from airflow.jobs.job import Job, run_job
 from airflow.jobs.scheduler_job_runner import SchedulerJobRunner
 from airflow.models.asset import AssetActive, AssetAliasModel, AssetDagRunQueue, AssetEvent, AssetModel
 from airflow.models.backfill import Backfill, _create_backfill
+from airflow.models.callback import CallbackState
 from airflow.models.dag import DagModel, get_last_dagrun, infer_automated_data_interval
 from airflow.models.dag_version import DagVersion
 from airflow.models.dagrun import DagRun
 from airflow.models.dagwarning import DagWarning
 from airflow.models.db_callback_request import DbCallbackRequest
-from airflow.models.deadline import Deadline, DeadlineCallbackState
+from airflow.models.deadline import Deadline
 from airflow.models.log import Log
 from airflow.models.pool import Pool
 from airflow.models.serialized_dag import SerializedDagModel
@@ -6899,7 +6900,7 @@ class TestSchedulerJob:
         dagrun_id = dag_maker.create_dagrun().id
 
         handled_deadlines = []
-        for state in DeadlineCallbackState:
+        for state in CallbackState:
             deadline = Deadline(
                 deadline_time=past_date, callback=AsyncCallback(callback_path), dagrun_id=dagrun_id
             )

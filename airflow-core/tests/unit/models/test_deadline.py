@@ -25,11 +25,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from airflow.api_fastapi.core_api.datamodels.dag_run import DAGRunResponse
 from airflow.models import DagRun, Trigger
-from airflow.models.deadline import Deadline, DeadlineCallbackState, ReferenceModels, _fetch_from_db
+from airflow.models.deadline import Deadline, ReferenceModels, _fetch_from_db
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.sdk.definitions.deadline import AsyncCallback, DeadlineReference, SyncCallback
 from airflow.triggers.base import TriggerEvent
-from airflow.triggers.deadline import PAYLOAD_BODY_KEY, PAYLOAD_STATUS_KEY
+from airflow.triggers.callback import PAYLOAD_BODY_KEY, PAYLOAD_STATUS_KEY, CallbackState
 from airflow.utils.state import DagRunState
 
 from tests_common.test_utils import db
@@ -214,26 +214,22 @@ class TestDeadline:
         "event, none_trigger_expected",
         [
             pytest.param(
-                TriggerEvent(
-                    {PAYLOAD_STATUS_KEY: DeadlineCallbackState.SUCCESS, PAYLOAD_BODY_KEY: "test_result"}
-                ),
+                TriggerEvent({PAYLOAD_STATUS_KEY: CallbackState.SUCCESS, PAYLOAD_BODY_KEY: "test_result"}),
                 True,
                 id="success_event",
             ),
             pytest.param(
-                TriggerEvent(
-                    {PAYLOAD_STATUS_KEY: DeadlineCallbackState.FAILED, PAYLOAD_BODY_KEY: "RuntimeError"}
-                ),
+                TriggerEvent({PAYLOAD_STATUS_KEY: CallbackState.FAILED, PAYLOAD_BODY_KEY: "RuntimeError"}),
                 True,
                 id="failed_event",
             ),
             pytest.param(
-                TriggerEvent({PAYLOAD_STATUS_KEY: DeadlineCallbackState.RUNNING}),
+                TriggerEvent({PAYLOAD_STATUS_KEY: CallbackState.RUNNING}),
                 False,
                 id="running_event",
             ),
             pytest.param(
-                TriggerEvent({PAYLOAD_STATUS_KEY: DeadlineCallbackState.QUEUED, PAYLOAD_BODY_KEY: ""}),
+                TriggerEvent({PAYLOAD_STATUS_KEY: CallbackState.QUEUED, PAYLOAD_BODY_KEY: ""}),
                 False,
                 id="invalid_event",
             ),
@@ -250,16 +246,16 @@ class TestDeadline:
         assert none_trigger_expected == (deadline_orm.trigger is None)
 
         status = event.payload[PAYLOAD_STATUS_KEY]
-        if status in set(DeadlineCallbackState):
+        if status in set(CallbackState):
             assert deadline_orm.callback_state == status
         else:
-            assert deadline_orm.callback_state == DeadlineCallbackState.QUEUED
+            assert deadline_orm.callback_state == CallbackState.QUEUED
 
     def test_handle_miss_sets_callback_state(self, dagrun, deadline_orm, session):
         """Test that handle_miss sets the callback state to QUEUED."""
         deadline_orm.handle_miss(session)
 
-        assert deadline_orm.callback_state == DeadlineCallbackState.QUEUED
+        assert deadline_orm.callback_state == CallbackState.QUEUED
 
 
 @pytest.mark.db_test

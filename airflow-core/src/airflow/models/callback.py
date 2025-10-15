@@ -49,6 +49,10 @@ class CallbackState(str, Enum):
     FAILED = "failed"
 
 
+ACTIVE_STATES = frozenset((CallbackState.QUEUED, CallbackState.RUNNING))
+TERMINAL_STATES = frozenset((CallbackState.SUCCESS, CallbackState.FAILED))
+
+
 class CallbackType(str, Enum):
     """
     Types of Callbacks.
@@ -156,11 +160,30 @@ class TriggererCallback(Callback):
 
     def queue(self):
         # TODO: queue the trigger
+        from airflow.models.trigger import Trigger
+        from airflow.triggers.callback import CallbackTrigger
+
+        self.trigger = Trigger.from_object(
+            CallbackTrigger(
+                callback_path=self.data["path"],
+                callback_kwargs=self.data["kwargs"],
+            )
+        )
         super().queue()
 
     def handle_event(self, event: TriggerEvent, session: Session):
         # TODO: modify fields based on the event
-        pass
+        from airflow.triggers.callback import PAYLOAD_BODY_KEY, PAYLOAD_STATUS_KEY
+
+        if (status := event.payload.get(PAYLOAD_STATUS_KEY)) and status in (ACTIVE_STATES | TERMINAL_STATES):
+            self.state = status
+            if status in TERMINAL_STATES:
+                self.trigger = None
+                self.output = event.payload.get(PAYLOAD_BODY_KEY)
+
+            session.add(self)
+        else:
+            log.error("Unexpected event received: %s", event.payload)
 
 
 class ExecutorCallback(Callback):
