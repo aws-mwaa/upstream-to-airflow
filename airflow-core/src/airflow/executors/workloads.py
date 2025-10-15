@@ -44,7 +44,7 @@ class BaseWorkload(BaseModel):
     """The identity token for this workload"""
 
     @staticmethod
-    def generate_token(sub_id: str, generator: JWTGenerator | None = None):
+    def generate_token(sub_id: str, generator: JWTGenerator | None = None) -> str:
         return generator.generate({"sub": sub_id}) if generator else ""
 
 
@@ -123,8 +123,6 @@ class ExecuteTask(BaseDagBundleWorkload):
         generator: JWTGenerator | None = None,
         bundle_info: BundleInfo | None = None,
     ) -> ExecuteTask:
-        from pathlib import Path
-
         from airflow.utils.helpers import log_filename_template_renderer
 
         ser_ti = TaskInstance.model_validate(ti, from_attributes=True)
@@ -161,8 +159,6 @@ class ExecuteCallback(BaseDagBundleWorkload):
         generator: JWTGenerator | None = None,
         bundle_info: BundleInfo | None = None,
     ) -> ExecuteCallback:
-        from pathlib import Path
-
         if not bundle_info:
             bundle_info = BundleInfo(
                 name=dag_run.dag_model.bundle_name,

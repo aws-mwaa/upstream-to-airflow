@@ -16,11 +16,11 @@
 # under the License.
 from __future__ import annotations
 
-import logging
 from enum import Enum
 from importlib import import_module
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
+import structlog
 import uuid6
 from sqlalchemy import Column, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from airflow.callbacks.callback_requests import CallbackRequest
     from airflow.triggers.base import TriggerEvent
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 class CallbackState(str, Enum):
@@ -69,6 +69,23 @@ class CallbackFetchMethod(str, Enum):
 
     # For deadline callbacks since they import callbacks through the import path
     IMPORT_PATH = "import_path"
+
+
+class ImportPathCallbackProtocol(Protocol):
+    """Protocol for callbacks that use the import path fetch method."""
+
+    path: str
+    kwargs: dict | None
+
+    def serialize(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        ...
+
+
+class SyncCallbackProtocol(ImportPathCallbackProtocol):
+    """Protocol for callbacks that use the import path fetch method and have an executor attribute."""
+
+    executor: str | None
 
 
 class Callback(Base):
@@ -116,7 +133,7 @@ class Callback(Base):
         self.state = CallbackState.QUEUED
 
     @staticmethod
-    def create_from_sdk_def(callback_def) -> Callback:
+    def create_from_sdk_def(callback_def: Any) -> Callback:
         # Cannot check type using isinstance() because that would require SDK import
         match type(callback_def).__name__:
             case "AsyncCallback":
@@ -132,7 +149,7 @@ class TriggererCallback(Callback):
 
     __mapper_args__ = {"polymorphic_identity": CallbackType.TRIGGERER}
 
-    def __init__(self, callback_def, **kwargs):
+    def __init__(self, callback_def: ImportPathCallbackProtocol, **kwargs):
         super().__init__(**kwargs)
         self.fetch_method = CallbackFetchMethod.IMPORT_PATH
         self.data = callback_def.serialize()
@@ -151,7 +168,7 @@ class ExecutorCallback(Callback):
 
     __mapper_args__ = {"polymorphic_identity": CallbackType.EXECUTOR}
 
-    def __init__(self, callback_def, fetch_method: CallbackFetchMethod, **kwargs):
+    def __init__(self, callback_def: SyncCallbackProtocol, fetch_method: CallbackFetchMethod, **kwargs):
         super().__init__(**kwargs)
         self.fetch_method = fetch_method
         self.data = callback_def.serialize()
