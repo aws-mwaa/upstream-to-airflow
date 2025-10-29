@@ -654,15 +654,14 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                         # All executors should have a name if they are initted from the executor_loader.
                         # But we need to check for None to make mypy happy.
                         assert executor_obj.name
-                    # TODO: Move to debug
+                    # TODO: move to debug or removed entirely
                     self.log.info("Using executor %s for task %s", executor_obj.name, task_instance)
-                    # Check team-aware executor matching
                     task_team = self._get_task_team_name(task_instance, session)
-                    # TODO: move to debug
+                    # TODO: move to debug or removed entirely
                     self.log.info("Task %s belongs to team %s", task_instance, task_team)
                     if task_team is not None:
                         executor_team = getattr(executor_obj, "team_name", None)
-                        # TODO: move to debug
+                        # TODO: move to debug or removed entirely
                         self.log.info("Executor %s belongs to team %s", executor_obj.name, executor_team)
 
                     if executor_slots_available[executor_obj.name] <= 0:
@@ -2760,7 +2759,12 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         # Firstly, check if there is no executor set on the TaskInstance, if not, we need to fetch the default
         # (either globally or for the team)
         if ti.executor is None:
-            team_name = self._get_task_team_name(ti, session)
+            if not conf.getboolean("multi_team", "enabled"):
+                team_name = None
+            else:
+                # Query the database to get the team name
+                team_name = self._get_task_team_name(ti, session)
+
             if not team_name:
                 # No team is specified, so just use the global default executor
                 return self.job.executor
