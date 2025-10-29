@@ -309,13 +309,12 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
             return team_name
 
-        except Exception as e:
+        except Exception:
             # Log the error, explicitly don't fail the scheduling loop
-            self.log.warning(
-                "Failed to resolve team name for task %s (dag_id=%s): %s",
+            self.log.exception(
+                "Failed to resolve team name for task %s (dag_id=%s)",
                 task_instance.task_id,
                 task_instance.dag_id,
-                e,
             )
             return None
 
@@ -654,15 +653,6 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                         # All executors should have a name if they are initted from the executor_loader.
                         # But we need to check for None to make mypy happy.
                         assert executor_obj.name
-                    # TODO: move to debug or removed entirely
-                    self.log.info("Using executor %s for task %s", executor_obj.name, task_instance)
-                    task_team = self._get_task_team_name(task_instance, session)
-                    # TODO: move to debug or removed entirely
-                    self.log.info("Task %s belongs to team %s", task_instance, task_team)
-                    if task_team is not None:
-                        executor_team = getattr(executor_obj, "team_name", None)
-                        # TODO: move to debug or removed entirely
-                        self.log.info("Executor %s belongs to team %s", executor_obj.name, executor_team)
 
                     if executor_slots_available[executor_obj.name] <= 0:
                         self.log.debug(
@@ -2756,38 +2746,42 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         In this context, we don't want to fail if the executor does not exist. Catch the exception and
         log to the user.
         """
+        executor = None
+        if conf.getboolean("multi_team", "enabled"):
+            # Query the database to get the team name
+            team_name = self._get_task_team_name(ti, session)
+        else:
+            team_name = None
         # Firstly, check if there is no executor set on the TaskInstance, if not, we need to fetch the default
         # (either globally or for the team)
         if ti.executor is None:
-            if not conf.getboolean("multi_team", "enabled"):
-                team_name = None
-            else:
-                # Query the database to get the team name
-                team_name = self._get_task_team_name(ti, session)
-
             if not team_name:
                 # No team is specified, so just use the global default executor
-                return self.job.executor
-            # We do have a team, so we need to find the default executor for that team
-            # TODO[multi-team]: This is already cached in the ExecutorLoader, should we just read it from
-            # there instead? Is loading the ExecutorLoader worth it? This loop should be pretty fast.
-            for executor in self.job.executors:
-                # First executor that resolves should be the default for that team
-                if executor.team_name == team_name:
-                    return executor
+                executor = self.job.executor
+            else:
+                # We do have a team, so we need to find the default executor for that team
+                for _executor in self.job.executors:
+                    # First executor that resolves should be the default for that team
+                    if _executor.team_name == team_name:
+                        executor = _executor
         else:
             # An executor is specified on the TaskInstance (as a str), so we need to find it in the list of executors
-            for executor in self.job.executors:
-                if executor.name.alias == ti.executor or executor.name.module_path == ti.executor:
-                    return executor
+            for _executor in self.job.executors:
+                if ti.executor in (_executor.name.alias, _executor.name.module_path):
+                    if team_name and executor.team_name == team_name:
+                        executor = _executor
 
-        # This case should not happen unless some (as of now unknown) edge case occurs or direct DB
-        # modification, since the DAG parser will validate the tasks in the DAG and ensure the executor
-        # they request is available and if not, disallow the DAG to be scheduled.
-        # Keeping this exception handling because this is a critical issue if we do somehow find
-        # ourselves here and the user should get some feedback about that.
-        self.log.warning("Executor, %s, was not found but a Task was configured to use it", ti.executor)
-        return None
+        if executor is not None:
+            self.log.debug("Found executor %s for task %s (team: %s)", executor.name, ti, team_name)
+        else:
+            # This case should not happen unless some (as of now unknown) edge case occurs or direct DB
+            # modification, since the DAG parser will validate the tasks in the DAG and ensure the executor
+            # they request is available and if not, disallow the DAG to be scheduled.
+            # Keeping this exception handling because this is a critical issue if we do somehow find
+            # ourselves here and the user should get some feedback about that.
+            self.log.warning("Executor, %s, was not found but a Task was configured to use it", ti.executor)
+
+        return executor
 
 
 # Backcompat for older versions of task sdk import SchedulerDagBag from here
