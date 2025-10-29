@@ -139,6 +139,7 @@ class Job(Base, LoggingMixin):
         # Save init parameters as DB fields
         self.heartbeat_failed = False
         self.hostname = get_hostname()
+        # TODO[multi-team]: Make this multi-team?
         if executor:
             self.executors = [executor]
         self.start_date = timezone.utcnow()

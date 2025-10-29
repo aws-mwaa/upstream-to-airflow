@@ -68,10 +68,12 @@ from airflow.models.backfill import Backfill
 from airflow.models.dag import DagModel, get_next_data_interval, get_run_data_interval
 from airflow.models.dag_version import DagVersion
 from airflow.models.dagbag import DBDagBag
+from airflow.models.dagbundle import DagBundleModel
 from airflow.models.dagrun import DagRun
 from airflow.models.dagwarning import DagWarning, DagWarningType
 from airflow.models.serialized_dag import SerializedDagModel
 from airflow.models.taskinstance import TaskInstance
+from airflow.models.team import Team
 from airflow.models.trigger import TRIGGER_FAIL_REPR, Trigger, TriggerFailureReason
 from airflow.stats import Stats
 from airflow.ti_deps.dependencies_states import EXECUTION_STATES
@@ -269,6 +271,53 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             resetter.callback(signal.signal, signal.SIGUSR1, prev)
 
         return resetter
+
+    def _get_task_team_name(self, task_instance: TaskInstance, session: Session) -> str | None:
+        """
+        Resolve team name for a task instance using the DAG > Bundle > Team relationship chain.
+
+        TaskInstance > DagModel (via dag_id) > DagBundleModel (via bundle_name) > Team
+
+        :param task_instance: The TaskInstance to resolve team name for
+        :param session: Database session for queries
+        :return: Team name if found or None
+        """
+        try:
+            team_name = session.scalar(
+                select(Team.name)
+                .join(DagBundleModel.teams)  # Join Team to DagBundleModel via association table
+                .join(
+                    DagModel, DagModel.bundle_name == DagBundleModel.name
+                )  # Join DagBundleModel to DagModel
+                .where(DagModel.dag_id == task_instance.dag_id)
+                .limit(1)  # There should be a single team per bundle, but be defensive
+            )
+
+            if team_name:
+                self.log.debug(
+                    "Resolved team name '%s' for task %s (dag_id=%s)",
+                    team_name,
+                    task_instance.task_id,
+                    task_instance.dag_id,
+                )
+            else:
+                self.log.debug(
+                    "No team found for task %s (dag_id=%s) - DAG may not have bundle or team association",
+                    task_instance.task_id,
+                    task_instance.dag_id,
+                )
+
+            return team_name
+
+        except Exception as e:
+            # Log the error, explicitly don't fail the scheduling loop
+            self.log.warning(
+                "Failed to resolve team name for task %s (dag_id=%s): %s",
+                task_instance.task_id,
+                task_instance.dag_id,
+                e,
+            )
+            return None
 
     def _exit_gracefully(self, signum: int, frame: FrameType | None) -> None:
         """Clean up processor_agent to avoid leaving orphan processes."""
@@ -600,11 +649,22 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                             )
                             continue
 
-                if executor_obj := self._try_to_load_executor(task_instance.executor):
+                if executor_obj := self._try_to_load_executor(task_instance, session):
                     if TYPE_CHECKING:
                         # All executors should have a name if they are initted from the executor_loader.
                         # But we need to check for None to make mypy happy.
                         assert executor_obj.name
+                    # TODO: Move to debug
+                    self.log.info("Using executor %s for task %s", executor_obj.name, task_instance)
+                    # Check team-aware executor matching
+                    task_team = self._get_task_team_name(task_instance, session)
+                    # TODO: move to debug
+                    self.log.info("Task %s belongs to team %s", task_instance, task_team)
+                    if task_team is not None:
+                        executor_team = getattr(executor_obj, "team_name", None)
+                        # TODO: move to debug
+                        self.log.info("Executor %s belongs to team %s", executor_obj.name, executor_team)
+
                     if executor_slots_available[executor_obj.name] <= 0:
                         self.log.debug(
                             "Not scheduling %s since its executor %s does not currently have any more "
@@ -745,7 +805,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         queued_tis = self._executable_task_instances_to_queued(max_tis, session=session)
 
         # Sort queued TIs to their respective executor
-        executor_to_queued_tis = self._executor_to_tis(queued_tis)
+        executor_to_queued_tis = self._executor_to_tis(queued_tis, session)
         for executor, queued_tis_per_executor in executor_to_queued_tis.items():
             self.log.info(
                 "Trying to enqueue tasks: %s for executor: %s",
@@ -2099,7 +2159,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         scheduled) up to 2 times before failing the task.
         """
         tasks_stuck_in_queued = self._get_tis_stuck_in_queued(session)
-        for executor, stuck_tis in self._executor_to_tis(tasks_stuck_in_queued).items():
+        for executor, stuck_tis in self._executor_to_tis(tasks_stuck_in_queued, session).items():
             try:
                 for ti in stuck_tis:
                     executor.revoke_task(ti=ti)
@@ -2355,7 +2415,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     )
 
                     to_reset: list[TaskInstance] = []
-                    exec_to_tis = self._executor_to_tis(tis_to_adopt_or_reset)
+                    exec_to_tis = self._executor_to_tis(tis_to_adopt_or_reset, session)
                     for executor, tis in exec_to_tis.items():
                         to_reset.extend(executor.try_adopt_task_instances(tis))
 
@@ -2512,7 +2572,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 request,
             )
             self.job.executor.send_callback(request)
-            if (executor := self._try_to_load_executor(ti.executor)) is None:
+            if (executor := self._try_to_load_executor(ti, session)) is None:
                 self.log.warning(
                     "Cannot clean up task instance without heartbeat %r with non-existent executor %s",
                     ti,
@@ -2679,35 +2739,50 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             session.add(warning)
             existing_warned_dag_ids.add(warning.dag_id)
 
-    def _executor_to_tis(self, tis: Iterable[TaskInstance]) -> dict[BaseExecutor, list[TaskInstance]]:
+    def _executor_to_tis(
+        self, tis: Iterable[TaskInstance], session
+    ) -> dict[BaseExecutor, list[TaskInstance]]:
         """Organize TIs into lists per their respective executor."""
         _executor_to_tis: defaultdict[BaseExecutor, list[TaskInstance]] = defaultdict(list)
         for ti in tis:
-            if executor_obj := self._try_to_load_executor(ti.executor):
+            if executor_obj := self._try_to_load_executor(ti, session):
                 _executor_to_tis[executor_obj].append(ti)
 
         return _executor_to_tis
 
-    def _try_to_load_executor(self, executor_name: str | None) -> BaseExecutor | None:
+    def _try_to_load_executor(self, ti: TaskInstance, session) -> BaseExecutor | None:
         """
         Try to load the given executor.
 
         In this context, we don't want to fail if the executor does not exist. Catch the exception and
         log to the user.
         """
-        if executor_name is None:
-            return self.job.executor
-
-        for e in self.job.executors:
-            if e.name.alias == executor_name or e.name.module_path == executor_name:
-                return e
+        # Firstly, check if there is no executor set on the TaskInstance, if not, we need to fetch the default
+        # (either globally or for the team)
+        if ti.executor is None:
+            team_name = self._get_task_team_name(ti, session)
+            if not team_name:
+                # No team is specified, so just use the global default executor
+                return self.job.executor
+            # We do have a team, so we need to find the default executor for that team
+            # TODO[multi-team]: This is already cached in the ExecutorLoader, should we just read it from
+            # there instead? Is loading the ExecutorLoader worth it? This loop should be pretty fast.
+            for executor in self.job.executors:
+                # First executor that resolves should be the default for that team
+                if executor.team_name == team_name:
+                    return executor
+        else:
+            # An executor is specified on the TaskInstance (as a str), so we need to find it in the list of executors
+            for executor in self.job.executors:
+                if executor.name.alias == ti.executor or executor.name.module_path == ti.executor:
+                    return executor
 
         # This case should not happen unless some (as of now unknown) edge case occurs or direct DB
         # modification, since the DAG parser will validate the tasks in the DAG and ensure the executor
         # they request is available and if not, disallow the DAG to be scheduled.
         # Keeping this exception handling because this is a critical issue if we do somehow find
         # ourselves here and the user should get some feedback about that.
-        self.log.warning("Executor, %s, was not found but a Task was configured to use it", executor_name)
+        self.log.warning("Executor, %s, was not found but a Task was configured to use it", ti.executor)
         return None
 
 
