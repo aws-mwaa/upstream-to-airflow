@@ -94,7 +94,7 @@ from airflow.utils.sqlalchemy import (
 )
 from airflow.utils.state import DagRunState, State, TaskInstanceState
 from airflow.utils.thread_safe_dict import ThreadSafeDict
-from airflow.utils.types import DagRunTriggeredByType, DagRunType
+from airflow.utils.types import NOTSET, DagRunTriggeredByType, DagRunType
 
 if TYPE_CHECKING:
     from types import FrameType
@@ -271,6 +271,52 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             resetter.callback(signal.signal, signal.SIGUSR1, prev)
 
         return resetter
+
+    def _get_team_names_for_dag_ids(
+        self, dag_ids: Collection[str], session: Session
+    ) -> dict[str, str | None]:
+        """
+        Batch query to resolve team names for multiple DAG IDs using the DAG > Bundle > Team relationship chain.
+
+        DAG IDs > DagModel (via dag_id) > DagBundleModel (via bundle_name) > Team
+
+        :param dag_ids: Collection of DAG IDs to resolve team names for
+        :param session: Database session for queries
+        :return: Dictionary mapping dag_id -> team_name (None if no team found)
+        """
+        if not dag_ids:
+            return {}
+
+        try:
+            # Query all team names for the given DAG IDs in a single query
+            query_results = session.execute(
+                select(DagModel.dag_id, Team.name)
+                .join(DagBundleModel.teams)  # Join Team to DagBundleModel via association table
+                .join(
+                    DagModel, DagModel.bundle_name == DagBundleModel.name
+                )  # Join DagBundleModel to DagModel
+                .where(DagModel.dag_id.in_(dag_ids))
+            ).all()
+
+            # Create mapping from results
+            dag_id_to_team_name = {dag_id: team_name for dag_id, team_name in query_results}
+
+            # Ensure all requested dag_ids are in the result (with None for those not found)
+            result = {dag_id: dag_id_to_team_name.get(dag_id) for dag_id in dag_ids}
+
+            self.log.debug(
+                "Resolved team names for %d DAGs: %s",
+                len([team for team in result.values() if team is not None]),
+                {dag_id: team for dag_id, team in result.items()},
+            )
+
+            return result
+
+        except Exception:
+            # Log the error, explicitly don't fail the scheduling loop
+            self.log.exception("Failed to resolve team names for DAG IDs: %s", list(dag_ids))
+            # Return dict with all None values to ensure graceful degradation
+            return {}
 
     def _get_task_team_name(self, task_instance: TaskInstance, session: Session) -> str | None:
         """
@@ -499,6 +545,16 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             task_instance_str = "\n".join(f"\t{x!r}" for x in task_instances_to_examine)
             self.log.info("%s tasks up for execution:\n%s", len(task_instances_to_examine), task_instance_str)
 
+            # Batch query to resolve team names for all DAG IDs to optimize performance
+            # Instead of individual queries in _try_to_load_executor(), resolve all team names upfront
+            unique_dag_ids = {ti.dag_id for ti in task_instances_to_examine}
+            dag_id_to_team_name = self._get_team_names_for_dag_ids(unique_dag_ids, session)
+            self.log.debug(
+                "Batch resolved team names for %d unique DAG IDs in scheduling loop: %s",
+                len(unique_dag_ids),
+                list(unique_dag_ids),
+            )
+
             executor_slots_available: dict[ExecutorName, int] = {}
             # First get a mapping of executor names to slots they have available
             for executor in self.job.executors:
@@ -648,7 +704,9 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                             )
                             continue
 
-                if executor_obj := self._try_to_load_executor(task_instance, session):
+                if executor_obj := self._try_to_load_executor(
+                    task_instance, session, team_name=dag_id_to_team_name.get(task_instance.dag_id, NOTSET)
+                ):
                     if TYPE_CHECKING:
                         # All executors should have a name if they are initted from the executor_loader.
                         # But we need to check for None to make mypy happy.
@@ -2739,17 +2797,23 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
         return _executor_to_tis
 
-    def _try_to_load_executor(self, ti: TaskInstance, session) -> BaseExecutor | None:
+    def _try_to_load_executor(self, ti: TaskInstance, session, team_name=NOTSET) -> BaseExecutor | None:
         """
         Try to load the given executor.
 
         In this context, we don't want to fail if the executor does not exist. Catch the exception and
         log to the user.
+
+        :param ti: TaskInstance to load executor for
+        :param session: Database session for queries
+        :param team_name: Optional pre-resolved team name. If NOTSET and multi-team is enabled,
+                         will query the database to resolve team name. None indicates global team.
         """
         executor = None
-        if conf.getboolean("multi_team", "enabled"):
-            # Query the database to get the team name
-            team_name = self._get_task_team_name(ti, session)
+        if conf.getboolean("core", "multi_team"):
+            # Use provided team_name if available, otherwise query the database
+            if team_name is NOTSET:
+                team_name = self._get_task_team_name(ti, session)
         else:
             team_name = None
         # Firstly, check if there is no executor set on the TaskInstance, if not, we need to fetch the default
@@ -2768,7 +2832,8 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             # An executor is specified on the TaskInstance (as a str), so we need to find it in the list of executors
             for _executor in self.job.executors:
                 if ti.executor in (_executor.name.alias, _executor.name.module_path):
-                    if team_name and executor.team_name == team_name:
+                    # The executor must either match the team or be global (i.e. team_name is None)
+                    if team_name and _executor.team_name == team_name or _executor.team_name is None:
                         executor = _executor
 
         if executor is not None:
