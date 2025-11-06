@@ -7280,8 +7280,7 @@ class TestSchedulerJob:
         result = self.job_runner._get_task_team_name(ti, session)
         assert result is None
 
-    @mock.patch("airflow.jobs.scheduler_job_runner.SchedulerJobRunner.log")
-    def test_multi_team_get_task_team_name_database_error(self, mock_log, dag_maker, session):
+    def test_multi_team_get_task_team_name_database_error(self, dag_maker, session):
         """Test graceful error handling when individual task team resolution fails. This code should _not_ fail the scheduler."""
         with dag_maker(dag_id="dag_test", session=session):
             task = EmptyOperator(task_id="task_test")
@@ -7292,13 +7291,13 @@ class TestSchedulerJob:
         scheduler_job = Job()
         self.job_runner = SchedulerJobRunner(job=scheduler_job)
 
-        # Mock session.scalar to raise an exception using context manager
-        with mock.patch.object(session, "scalar", side_effect=Exception("Database error")):
+        # Mock _get_team_names_for_dag_ids to return empty dict (simulates database error handling in that function)
+        with mock.patch.object(self.job_runner, "_get_team_names_for_dag_ids", return_value={}) as mock_batch:
             result = self.job_runner._get_task_team_name(ti, session)
+            mock_batch.assert_called_once_with([ti.dag_id], session)
 
-        # Should return None and log the error
+        # Should return None when batch function returns empty dict
         assert result is None
-        mock_log.exception.assert_called_once()
 
     @conf_vars({("core", "multi_team"): "false"})
     def test_multi_team_try_to_load_executor_multi_team_disabled(self, dag_maker, mock_executors, session):

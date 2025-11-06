@@ -328,41 +328,25 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         :param session: Database session for queries
         :return: Team name if found or None
         """
-        try:
-            team_name = session.scalar(
-                select(Team.name)
-                .join(DagBundleModel.teams)  # Join Team to DagBundleModel via association table
-                .join(
-                    DagModel, DagModel.bundle_name == DagBundleModel.name
-                )  # Join DagBundleModel to DagModel
-                .where(DagModel.dag_id == task_instance.dag_id)
-                .limit(1)  # There should be a single team per bundle, but be defensive
-            )
+        # Use the batch query function with a single DAG ID
+        dag_id_to_team_name = self._get_team_names_for_dag_ids([task_instance.dag_id], session)
+        team_name = dag_id_to_team_name.get(task_instance.dag_id)
 
-            if team_name:
-                self.log.debug(
-                    "Resolved team name '%s' for task %s (dag_id=%s)",
-                    team_name,
-                    task_instance.task_id,
-                    task_instance.dag_id,
-                )
-            else:
-                self.log.debug(
-                    "No team found for task %s (dag_id=%s) - DAG may not have bundle or team association",
-                    task_instance.task_id,
-                    task_instance.dag_id,
-                )
-
-            return team_name
-
-        except Exception:
-            # Log the error, explicitly don't fail the scheduling loop
-            self.log.exception(
-                "Failed to resolve team name for task %s (dag_id=%s)",
+        if team_name:
+            self.log.debug(
+                "Resolved team name '%s' for task %s (dag_id=%s)",
+                team_name,
                 task_instance.task_id,
                 task_instance.dag_id,
             )
-            return None
+        else:
+            self.log.debug(
+                "No team found for task %s (dag_id=%s) - DAG may not have bundle or team association",
+                task_instance.task_id,
+                task_instance.dag_id,
+            )
+
+        return team_name
 
     def _exit_gracefully(self, signum: int, frame: FrameType | None) -> None:
         """Clean up processor_agent to avoid leaving orphan processes."""
