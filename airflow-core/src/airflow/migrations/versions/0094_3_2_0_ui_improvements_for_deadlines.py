@@ -141,9 +141,9 @@ def downgrade() -> None:
         conn.execute(sa.text("PRAGMA foreign_keys=OFF"))
 
     with op.batch_alter_table("deadline", schema=None) as batch_op:
-        batch_op.drop_column("deadline_alert_id", if_exists=True)
-        batch_op.drop_column("last_updated_at", if_exists=True)
-        batch_op.drop_column("created_at", if_exists=True)
+        batch_op.drop_column("deadline_alert_id")
+        batch_op.drop_column("last_updated_at")
+        batch_op.drop_column("created_at")
 
     if dialect_name == "sqlite":
         conn.execute(sa.text("PRAGMA foreign_keys=ON"))
