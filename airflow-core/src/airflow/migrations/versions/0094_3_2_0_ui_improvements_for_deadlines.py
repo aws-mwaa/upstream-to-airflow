@@ -80,9 +80,7 @@ def upgrade() -> None:
     op.create_table(
         "deadline_alert",
         sa.Column("id", UUIDType(binary=False), default=uuid6.uuid7),
-        sa.Column(
-            "created_at", UtcDateTime, nullable=False, server_default=sa.text("timezone('utc', now())")
-        ),
+        sa.Column("created_at", UtcDateTime, nullable=False, server_default=sa.func.now()),
         sa.Column("serialized_dag_id", UUIDType(binary=False), nullable=False),
         sa.Column("name", sa.String(250), nullable=True),
         sa.Column("description", sa.Text(), nullable=True),
@@ -289,6 +287,12 @@ def migrate_existing_deadline_alert_data_from_serialized_dag() -> None:
     from airflow.configuration import conf
     from airflow.serialization.enums import Encoding
 
+    conn = op.get_bind()
+
+    # Skip data migration in offline mode (SQL generation only)
+    if conn is None:
+        return
+
     BATCH_SIZE = conf.getint("database", "migration_batch_size", fallback=DEFAULT_BATCH_SIZE)
 
     processed_dags: list[str] = []
@@ -298,7 +302,6 @@ def migrate_existing_deadline_alert_data_from_serialized_dag() -> None:
     batch_num = 0
     last_dag_id = ""
 
-    conn = op.get_bind()
     dialect = conn.dialect.name
 
     total_dags = conn.execute(
@@ -447,6 +450,12 @@ def migrate_deadline_alert_data_back_to_serialized_dag() -> None:
     from airflow.configuration import conf
     from airflow.serialization.enums import Encoding
 
+    conn = op.get_bind()
+
+    # Skip data migration in offline mode (SQL generation only)
+    if conn is None:
+        return
+
     BATCH_SIZE = conf.getint("database", "migration_batch_size", fallback=DEFAULT_BATCH_SIZE)
 
     processed_dags: list[str] = []
@@ -456,17 +465,15 @@ def migrate_deadline_alert_data_back_to_serialized_dag() -> None:
     batch_num = 0
     last_dag_id = ""
 
-    conn = op.get_bind()
     dialect = conn.dialect.name
 
     total_dags = conn.execute(
         sa.text("""
-                SELECT COUNT(*)
-                FROM serialized_dag
-                WHERE (data IS NOT NULL AND data -> 'dag' -> 'deadline' IS NOT NULL AND
-                       jsonb_typeof(data -> 'dag' -> 'deadline') = 'array')
-                   OR data_compressed IS NOT NULL
-                """)
+            SELECT COUNT(DISTINCT sd.id)
+            FROM serialized_dag sd
+            INNER JOIN deadline_alert da ON sd.id = da.serialized_dag_id
+            WHERE sd.data IS NOT NULL OR sd.data_compressed IS NOT NULL
+        """)
     ).scalar()
 
     total_batches = (total_dags + BATCH_SIZE - 1) // BATCH_SIZE
