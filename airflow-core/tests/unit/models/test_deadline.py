@@ -141,30 +141,29 @@ class TestDeadline:
         else:
             mock_session.query.assert_not_called()
 
-    def test_repr_with_callback_kwargs(self, deadline_orm, dagrun):
-        assert (
-            repr(deadline_orm)
-            == f"[DagRun Deadline] created at {DEFAULT_DATE}, Dag: {DAG_ID} Run: {dagrun.id}, "
-            f"needed by {DEFAULT_DATE} or run: {TEST_CALLBACK_PATH}({TEST_CALLBACK_KWARGS})"
-        )
-
-    def test_repr_without_callback_kwargs(self, dagrun, session):
+    @pytest.mark.parametrize(
+        "callback_kwargs",
+        [
+            pytest.param(TEST_CALLBACK_KWARGS, id="with_kwargs"),
+            pytest.param(None, id="without_kwargs"),
+        ],
+    )
+    def test_repr(self, dagrun, session, callback_kwargs):
         with time_machine.travel(DEFAULT_DATE, tick=False):
-            # Create a new Deadline without callback kwargs.
+            callback = AsyncCallback(TEST_CALLBACK_PATH, callback_kwargs) if callback_kwargs else AsyncCallback(TEST_CALLBACK_PATH)
             deadline = Deadline(
                 deadline_time=DEFAULT_DATE,
-                callback=AsyncCallback(TEST_CALLBACK_PATH),
+                callback=callback,
                 dagrun_id=dagrun.id,
                 deadline_alert_id=None,
             )
             session.add(deadline)
             session.flush()
 
-            assert deadline.callback.kwargs is None
             assert (
                 repr(deadline)
                 == f"[DagRun Deadline] created at {DEFAULT_DATE}, Dag: {DAG_ID} Run: {dagrun.id}, "
-                f"needed by {DEFAULT_DATE} or run: {TEST_CALLBACK_PATH}()"
+                f"needed by {DEFAULT_DATE} or run: {deadline.callback}"
             )
 
     @pytest.mark.db_test

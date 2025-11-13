@@ -36,7 +36,7 @@ from airflow.callbacks.callback_requests import DagCallbackRequest, DagRunContex
 from airflow.models.dag import DagModel, infer_automated_data_interval
 from airflow.models.dag_version import DagVersion
 from airflow.models.dagrun import DagRun, DagRunNote
-from airflow.models.deadline import Deadline
+from airflow.models.deadline import Deadline, ReferenceModels
 from airflow.models.deadline_alert import DeadlineAlert as DeadlineAlertModel
 from airflow.models.serialized_dag import SerializedDagModel
 from airflow.models.taskinstance import TaskInstance, TaskInstanceNote, clear_task_instances
@@ -1296,37 +1296,37 @@ class TestDagRun:
 
     @mock.patch.object(Deadline, "prune_deadlines")
     @mock.patch.object(DeadlineAlertModel, "get_by_id")
-    def test_dagrun_success_prunes_dagrun_deadlines(self, mock_get_by_id, mock_prune, dag_maker, session):
+    def test_dagrun_success_prunes_dagrun_deadlines(self, mock_get_by_id, mock_prune, session):
         mock_deadline_alert = mock.MagicMock()
-        mock_deadline_alert.reference_class = DeadlineReference.TYPES.DAGRUN
+        mock_deadline_alert.reference_class = ReferenceModels.FixedDatetimeDeadline
         mock_get_by_id.return_value = mock_deadline_alert
 
-        deadline_id_1 = "deadline_alert_uuid1"
-        deadline_id_2 = "deadline_alert_uuid2"
-
-        with dag_maker(
+        dag = DAG(
             dag_id="test_dagrun_prune_deadlines",
             schedule=datetime.timedelta(days=1),
-        ) as dag:
-            dag_task1 = EmptyOperator(task_id="task_1")
-            dag_task2 = EmptyOperator(task_id="task_2")
-            dag_task1.set_downstream(dag_task2)
+        )
+        task_1 = EmptyOperator(task_id="task_1", dag=dag)
+        task_2 = EmptyOperator(task_id="task_2", dag=dag)
+        task_1.set_downstream(task_2)
+
+        scheduler_dag = sync_dag_to_db(dag, session=session)
+
+        deadline_ids = ["deadline-uuid-1", "deadline-uuid-2"]
+        scheduler_dag.deadline = deadline_ids
 
         initial_task_states = {
             "task_1": TaskInstanceState.SUCCESS,
             "task_2": TaskInstanceState.SUCCESS,
         }
 
-        dag_run = self.create_dag_run(dag=dag, task_states=initial_task_states, session=session)
-        dag_run = session.merge(dag_run)
-        dag.deadline = [deadline_id_1, deadline_id_2]
-        dag_run.dag = dag
+        dag_run = self.create_dag_run(dag=scheduler_dag, task_states=initial_task_states, session=session)
+        dag_run.dag = scheduler_dag
 
         dag_run.update_state(session=session)
 
-        assert mock_get_by_id.call_count == 2
-        mock_get_by_id.assert_any_call(deadline_id_1, session)
-        mock_get_by_id.assert_any_call(deadline_id_2, session)
+        assert mock_get_by_id.call_count == len(deadline_ids)
+        for deadline_id in deadline_ids:
+            mock_get_by_id.assert_any_call(deadline_id, session)
         mock_prune.assert_called_once_with(session=session, conditions={DagRun.run_id: dag_run.run_id})
         assert dag_run.state == DagRunState.SUCCESS
 

@@ -60,6 +60,7 @@ from airflow.models.dagrun import DagRun
 from airflow.models.dagwarning import DagWarning
 from airflow.models.db_callback_request import DbCallbackRequest
 from airflow.models.deadline import Deadline
+from airflow.models.deadline_alert import DeadlineAlert
 from airflow.models.log import Log
 from airflow.models.pool import Pool
 from airflow.models.serialized_dag import SerializedDagModel
@@ -124,7 +125,6 @@ EXAMPLE_STANDARD_DAGS_FOLDER = (
 DEFAULT_DATE = timezone.datetime(2016, 1, 1)
 DEFAULT_LOGICAL_DATE = timezone.coerce_datetime(DEFAULT_DATE)
 TRY_NUMBER = 1
-
 
 @pytest.fixture(scope="class")
 def disable_load_example():
@@ -7109,11 +7109,28 @@ class TestSchedulerJob:
             EmptyOperator(task_id="empty")
         dagrun_id = dag_maker.create_dagrun().id
 
+        serialized_dag = session.scalar(
+            select(SerializedDagModel).where(SerializedDagModel.dag_id == dag_id)
+        )
+        assert serialized_dag is not None
+
+        # Create a test DeadlineAlert object for Deadline
+        deadline_alert = DeadlineAlert(
+            serialized_dag_id=serialized_dag.id,
+            name="Test Alert",
+            reference={"type": "dag", "dag_id": dag_id},
+            interval=300.0,  # 5 minutes
+            callback_def={"classpath": callback_path, "kwargs": {}},
+        )
+        session.add(deadline_alert)
+        session.flush()
+
         handled_deadline_async = Deadline(
             deadline_time=past_date,
             callback=AsyncCallback(callback_path),
             dagrun_id=dagrun_id,
             dag_id=dag_id,
+            deadline_alert_id=deadline_alert.id,
         )
         handled_deadline_async.missed = True
 
@@ -7122,20 +7139,29 @@ class TestSchedulerJob:
             callback=SyncCallback(callback_path),
             dagrun_id=dagrun_id,
             dag_id=dag_id,
+            deadline_alert_id=deadline_alert.id,
         )
         handled_deadline_sync.missed = True
 
         expired_deadline1 = Deadline(
-            deadline_time=past_date, callback=AsyncCallback(callback_path), dagrun_id=dagrun_id, dag_id=dag_id
+            deadline_time=past_date,
+            callback=AsyncCallback(callback_path),
+            dagrun_id=dagrun_id, dag_id=dag_id,
+            deadline_alert_id=deadline_alert.id,
         )
         expired_deadline2 = Deadline(
-            deadline_time=past_date, callback=SyncCallback(callback_path), dagrun_id=dagrun_id, dag_id=dag_id
+            deadline_time=past_date,
+            callback=SyncCallback(callback_path),
+            dagrun_id=dagrun_id,
+            dag_id=dag_id,
+            deadline_alert_id=deadline_alert.id,
         )
         future_deadline = Deadline(
             deadline_time=future_date,
             callback=AsyncCallback(callback_path),
             dagrun_id=dagrun_id,
             dag_id=dag_id,
+            deadline_alert_id=deadline_alert.id,
         )
 
         session.add_all(
