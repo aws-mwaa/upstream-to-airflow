@@ -85,7 +85,7 @@ def upgrade() -> None:
     op.create_table(
         "deadline_alert",
         sa.Column("id", UUIDType(binary=False), default=uuid6.uuid7),
-        sa.Column("created_at", UtcDateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column("created_at", UtcDateTime, nullable=False),
         sa.Column("serialized_dag_id", UUIDType(binary=False), nullable=False),
         sa.Column("name", sa.String(250), nullable=True),
         sa.Column("description", sa.Text(), nullable=True),
@@ -100,14 +100,8 @@ def upgrade() -> None:
 
     with op.batch_alter_table("deadline", schema=None) as batch_op:
         batch_op.add_column(sa.Column("deadline_alert_id", UUIDType(binary=False), nullable=True))
-        batch_op.add_column(
-            sa.Column("created_at", TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP"))
-        )
-        batch_op.add_column(
-            sa.Column(
-                "last_updated_at", TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
-            )
-        )
+        batch_op.add_column(sa.Column("created_at", TIMESTAMP(timezone=True), default=timezone.utcnow, nullable=False))
+        batch_op.add_column(sa.Column("last_updated_at", TIMESTAMP(timezone=True), default=timezone.utcnow, nullable=False))
 
     if dialect_name == "sqlite":
         conn.execute(sa.text("PRAGMA foreign_keys=ON"))
