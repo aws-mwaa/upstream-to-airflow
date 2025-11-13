@@ -2376,7 +2376,7 @@ class SerializedDAG(BaseSerialization):
     dag_id: str
     dag_display_name: str
     dagrun_timeout: datetime.timedelta | None
-    deadline: list[DeadlineAlert] | DeadlineAlert | None
+    deadline: list[str] | None
     default_args: dict[str, Any]
     description: str | None
     disable_bundle_versioning: bool

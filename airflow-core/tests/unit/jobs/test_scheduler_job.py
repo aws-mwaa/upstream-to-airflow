@@ -126,6 +126,7 @@ DEFAULT_DATE = timezone.datetime(2016, 1, 1)
 DEFAULT_LOGICAL_DATE = timezone.coerce_datetime(DEFAULT_DATE)
 TRY_NUMBER = 1
 
+
 @pytest.fixture(scope="class")
 def disable_load_example():
     with conf_vars({("core", "load_examples"): "false"}):
@@ -7109,9 +7110,7 @@ class TestSchedulerJob:
             EmptyOperator(task_id="empty")
         dagrun_id = dag_maker.create_dagrun().id
 
-        serialized_dag = session.scalar(
-            select(SerializedDagModel).where(SerializedDagModel.dag_id == dag_id)
-        )
+        serialized_dag = session.scalar(select(SerializedDagModel).where(SerializedDagModel.dag_id == dag_id))
         assert serialized_dag is not None
 
         # Create a test DeadlineAlert object for Deadline
@@ -7146,7 +7145,8 @@ class TestSchedulerJob:
         expired_deadline1 = Deadline(
             deadline_time=past_date,
             callback=AsyncCallback(callback_path),
-            dagrun_id=dagrun_id, dag_id=dag_id,
+            dagrun_id=dagrun_id,
+            dag_id=dag_id,
             deadline_alert_id=deadline_alert.id,
         )
         expired_deadline2 = Deadline(

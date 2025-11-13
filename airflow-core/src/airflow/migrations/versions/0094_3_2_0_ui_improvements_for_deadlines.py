@@ -37,11 +37,13 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 import uuid6
-from alembic import op
+from alembic import context, op
 from sqlalchemy_utils import UUIDType
 
 from airflow._shared.timezones import timezone
+from airflow.configuration import conf
 from airflow.migrations.db_types import TIMESTAMP
+from airflow.serialization.enums import Encoding
 from airflow.utils.sqlalchemy import UtcDateTime
 
 if TYPE_CHECKING:
@@ -302,14 +304,19 @@ def report_errors(errors: ErrorDict, operation: str = "migration") -> None:
 
 def migrate_existing_deadline_alert_data_from_serialized_dag() -> None:
     """Extract DeadlineAlert data from serialized Dag data and populate deadline_alert table."""
-    from airflow.configuration import conf
-    from airflow.serialization.enums import Encoding
+    if context.is_offline_mode():
+        print(
+            """
+            ------------
+            --  WARNING: Unable to migrate DeadlineAlert data while in offline mode!
+            --  The deadline_alert table will remain empty in offline mode.
+            --  Run the migration in online mode to populate the deadline_alert table.
+            ------------
+            """
+        )
+        return
 
     conn = op.get_bind()
-
-    # Skip data migration in offline mode (SQL generation only)
-    if conn is None:
-        return
 
     BATCH_SIZE = conf.getint("database", "migration_batch_size", fallback=DEFAULT_BATCH_SIZE)
 
@@ -465,14 +472,19 @@ def migrate_existing_deadline_alert_data_from_serialized_dag() -> None:
 
 def migrate_deadline_alert_data_back_to_serialized_dag() -> None:
     """Restore DeadlineAlert data from deadline_alert table back to serialized_dag."""
-    from airflow.configuration import conf
-    from airflow.serialization.enums import Encoding
+    if context.is_offline_mode():
+        print(
+            """
+            ------------
+            --  WARNING: Unable to restore DeadlineAlert data while in offline mode!
+            --  The serialized_dag deadline field will not be restored in offline mode.
+            --  Run the migration in online mode to restore DeadlineAlert data.
+            ------------
+            """
+        )
+        return
 
     conn = op.get_bind()
-
-    # Skip data migration in offline mode (SQL generation only)
-    if conn is None:
-        return
 
     BATCH_SIZE = conf.getint("database", "migration_batch_size", fallback=DEFAULT_BATCH_SIZE)
 

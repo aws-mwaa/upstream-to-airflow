@@ -150,7 +150,11 @@ class TestDeadline:
     )
     def test_repr(self, dagrun, session, callback_kwargs):
         with time_machine.travel(DEFAULT_DATE, tick=False):
-            callback = AsyncCallback(TEST_CALLBACK_PATH, callback_kwargs) if callback_kwargs else AsyncCallback(TEST_CALLBACK_PATH)
+            callback = (
+                AsyncCallback(TEST_CALLBACK_PATH, callback_kwargs)
+                if callback_kwargs
+                else AsyncCallback(TEST_CALLBACK_PATH)
+            )
             deadline = Deadline(
                 deadline_time=DEFAULT_DATE,
                 callback=callback,
