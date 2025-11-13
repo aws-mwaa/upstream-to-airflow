@@ -134,16 +134,17 @@ def downgrade() -> None:
     conn = op.get_bind()
     dialect_name = conn.dialect.name
 
-    op.drop_constraint(op.f("deadline_deadline_alert_id_fkey"), "deadline", type_="foreignkey")
-    op.drop_constraint(op.f("deadline_alert_serialized_dag_id_fkey"), "deadline_alert", type_="foreignkey")
-
     if dialect_name == "sqlite":
         conn.execute(sa.text("PRAGMA foreign_keys=OFF"))
 
     with op.batch_alter_table("deadline", schema=None) as batch_op:
+        batch_op.drop_constraint(batch_op.f("deadline_deadline_alert_id_fkey"), type_="foreignkey")
         batch_op.drop_column("deadline_alert_id")
         batch_op.drop_column("last_updated_at")
         batch_op.drop_column("created_at")
+
+    with op.batch_alter_table("deadline_alert", schema=None) as batch_op:
+        batch_op.drop_constraint(batch_op.f("deadline_alert_serialized_dag_id_fkey"), type_="foreignkey")
 
     if dialect_name == "sqlite":
         conn.execute(sa.text("PRAGMA foreign_keys=ON"))
