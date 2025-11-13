@@ -77,6 +77,9 @@ def upgrade() -> None:
     #   user-provided DeadlineDefinition, and the actual instance of a Definition is (still) the Deadline.
     #   This feels more intuitive than DeadlineAlert defining the Deadline.
 
+    conn = op.get_bind()
+    dialect_name = conn.dialect.name
+
     op.create_table(
         "deadline_alert",
         sa.Column("id", UUIDType(binary=False), default=uuid6.uuid7),
@@ -90,6 +93,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("deadline_alert_pkey")),
     )
 
+    if dialect_name == "sqlite":
+        conn.execute(sa.text("PRAGMA foreign_keys=OFF"))
+
     with op.batch_alter_table("deadline", schema=None) as batch_op:
         batch_op.add_column(sa.Column("deadline_alert_id", UUIDType(binary=False), nullable=True))
         batch_op.add_column(
@@ -100,6 +106,9 @@ def upgrade() -> None:
                 "last_updated_at", TIMESTAMP(timezone=True), nullable=False, server_default=sa.func.now()
             )
         )
+
+    if dialect_name == "sqlite":
+        conn.execute(sa.text("PRAGMA foreign_keys=ON"))
 
     op.create_foreign_key(
         op.f("deadline_deadline_alert_id_fkey"),
@@ -126,13 +135,22 @@ def downgrade() -> None:
     """Remove changes that were added to enable adding DeadlineAlerts to the UI."""
     migrate_deadline_alert_data_back_to_serialized_dag()
 
+    conn = op.get_bind()
+    dialect_name = conn.dialect.name
+
     op.drop_constraint(op.f("deadline_deadline_alert_id_fkey"), "deadline", type_="foreignkey")
     op.drop_constraint(op.f("deadline_alert_serialized_dag_id_fkey"), "deadline_alert", type_="foreignkey")
+
+    if dialect_name == "sqlite":
+        conn.execute(sa.text("PRAGMA foreign_keys=OFF"))
 
     with op.batch_alter_table("deadline", schema=None) as batch_op:
         batch_op.drop_column("deadline_alert_id", if_exists=True)
         batch_op.drop_column("last_updated_at", if_exists=True)
         batch_op.drop_column("created_at", if_exists=True)
+
+    if dialect_name == "sqlite":
+        conn.execute(sa.text("PRAGMA foreign_keys=ON"))
 
     op.drop_table("deadline_alert")
 
