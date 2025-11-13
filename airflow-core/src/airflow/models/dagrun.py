@@ -1260,17 +1260,19 @@ class DagRun(Base, LoggingMixin):
                     msg="success",
                 )
 
-            if dag.deadline and isinstance(dag.deadline[0], str):
-                # The dagrun has succeeded.  If there were any Deadlines for it which were not breached, they are no longer needed.
-                deadline_alerts = [
-                    DeadlineAlertModel.get_by_id(alert_id, session) for alert_id in dag.deadline
-                ]
+            if dag.deadline:
+                deadline_list = dag.deadline if isinstance(dag.deadline, list) else [dag.deadline]
+                if deadline_list and isinstance(deadline_list[0], str):
+                    # The dagrun has succeeded.  If there were any Deadlines for it which were not breached, they are no longer needed.
+                    deadline_alerts = [
+                        DeadlineAlertModel.get_by_id(alert_id, session) for alert_id in deadline_list
+                    ]
 
-                if any(
-                    deadline_alert.reference_class in DeadlineReference.TYPES.DAGRUN
-                    for deadline_alert in deadline_alerts
-                ):
-                    Deadline.prune_deadlines(session=session, conditions={DagRun.run_id: self.run_id})
+                    if any(
+                        deadline_alert.reference_class in DeadlineReference.TYPES.DAGRUN
+                        for deadline_alert in deadline_alerts
+                    ):
+                        Deadline.prune_deadlines(session=session, conditions={DagRun.run_id: self.run_id})
 
         # if *all tasks* are deadlocked, the run failed
         elif unfinished.should_schedule and not are_runnable_tasks:
