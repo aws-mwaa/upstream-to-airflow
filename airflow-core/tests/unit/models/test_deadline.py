@@ -36,9 +36,6 @@ from airflow.sdk.definitions.deadline import (
     SyncCallback,
     deadline_reference,
 )
-from airflow.triggers.base import TriggerEvent
-from airflow.triggers.deadline import PAYLOAD_BODY_KEY, PAYLOAD_STATUS_KEY
-from airflow.sdk.definitions.deadline import AsyncCallback, DeadlineReference, SyncCallback
 from airflow.utils.state import DagRunState
 
 from tests_common.test_utils import db
