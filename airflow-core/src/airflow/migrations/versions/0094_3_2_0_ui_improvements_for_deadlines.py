@@ -382,9 +382,9 @@ def migrate_existing_deadline_alert_data_from_serialized_dag() -> None:
                                     )
                                     continue
 
-                                reference_data = json.dumps(alert_data[REFERENCE_KEY], sort_keys=True)
+                                reference_data = alert_data[REFERENCE_KEY]
                                 interval_data = float(alert_data.get(INTERVAL_KEY))
-                                callback_data = json.dumps(alert_data[CALLBACK_KEY], sort_keys=True)
+                                callback_data = alert_data[CALLBACK_KEY]
                                 deadline_alert_id = str(uuid6.uuid7())
 
                                 conn.execute(
@@ -419,7 +419,11 @@ def migrate_existing_deadline_alert_data_from_serialized_dag() -> None:
                                 )
 
                                 if not validate_written_data(
-                                    conn, deadline_alert_id, reference_data, interval_data, callback_data
+                                    conn,
+                                    deadline_alert_id,
+                                    json.dumps(reference_data, sort_keys=True),
+                                    interval_data,
+                                    json.dumps(callback_data, sort_keys=True),
                                 ):
                                     dags_with_errors[dag_id].append(
                                         f"Invalid DeadlineAlert data: {serialized_alert}"
