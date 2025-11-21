@@ -130,6 +130,13 @@ with DAG(
         timeout=60 * 30,
     )
 
+    @task
+    def sleep_after_cluster_available():
+        import time
+        print('sleeping for 100s to wait for cluster stabilization')
+        time.sleep(100)
+        print('done sleeping')
+
     set_up_connection = create_connection(conn_id_name, cluster_id=redshift_cluster_identifier)
 
     create_bucket = S3CreateBucketOperator(
@@ -254,6 +261,7 @@ with DAG(
         create_object,
         create_table,
         # TEST BODY
+        sleep_after_cluster_available(),
         transfer_s3_to_sql,
         transfer_s3_to_sql_generator,
         check_table,

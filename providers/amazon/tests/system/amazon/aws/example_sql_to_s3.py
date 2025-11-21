@@ -137,6 +137,13 @@ with DAG(
         timeout=60 * 30,
     )
 
+    @task
+    def sleep_after_cluster_available():
+        import time
+        print('sleeping for 100s to wait for cluster stabilization')
+        time.sleep(100)
+        print('done sleeping')
+
     set_up_connection = create_connection(conn_id_name, cluster_id=redshift_cluster_identifier)
 
     create_table_redshift_data = RedshiftDataOperator(
@@ -203,6 +210,7 @@ with DAG(
         create_table_redshift_data,
         insert_data,
         # TEST BODY
+        sleep_after_cluster_available(),
         sql_to_s3_task,
         sql_to_s3_task_with_groupby,
         # TEST TEARDOWN
