@@ -21,6 +21,7 @@ from unittest.mock import ANY, Mock, patch
 from keycloak import KeycloakPostError
 
 from airflow.api_fastapi.app import AUTH_MANAGER_FASTAPI_APP_PREFIX
+from airflow.api_fastapi.auth.managers.exceptions import AuthManagerRefreshTokenExpiredException
 from airflow.providers.keycloak.auth_manager.user import KeycloakAuthManagerUser
 
 
@@ -131,3 +132,12 @@ class TestLoginRouter:
         assert response.cookies["_token"] == "token"
         mock_auth_manager.refresh_user.assert_called_once()
         mock_auth_manager.generate_jwt.assert_called_once()
+
+    @patch("airflow.providers.keycloak.auth_manager.routes.login.get_auth_manager")
+    def test_refresh_token_expired(self, mock_get_auth_manager, client):
+        mock_auth_manager = Mock()
+        mock_auth_manager.refresh_user.side_effect = AuthManagerRefreshTokenExpiredException()
+        mock_get_auth_manager.return_value = mock_auth_manager
+
+        response = client.get(AUTH_MANAGER_FASTAPI_APP_PREFIX + "/refresh", follow_redirects=False)
+        assert response.status_code == 401

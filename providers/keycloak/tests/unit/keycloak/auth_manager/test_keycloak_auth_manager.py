@@ -23,6 +23,7 @@ import pytest
 from keycloak import KeycloakPostError
 
 from airflow.api_fastapi.app import AUTH_MANAGER_FASTAPI_APP_PREFIX
+from airflow.api_fastapi.auth.managers.exceptions import AuthManagerRefreshTokenExpiredException
 from airflow.api_fastapi.auth.managers.models.resource_details import (
     AccessView,
     AssetAliasDetails,
@@ -160,7 +161,8 @@ class TestKeycloakAuthManager:
 
         mock_get_keycloak_client.return_value = keycloak_client
 
-        assert auth_manager.refresh_user(user=user) is None
+        with pytest.raises(AuthManagerRefreshTokenExpiredException):
+            auth_manager.refresh_user(user=user)
 
         keycloak_client.refresh_token.assert_called_with("refresh_token")
 
@@ -449,6 +451,7 @@ class TestKeycloakAuthManager:
             ],
             [200, [{"scopes": ["MENU"], "rsname": "Assets"}], {MenuItem.ASSETS}],
             [200, [], set()],
+            [401, [{"scopes": ["MENU"], "rsname": "Assets"}], set()],
             [403, [{"scopes": ["MENU"], "rsname": "Assets"}], set()],
         ],
     )

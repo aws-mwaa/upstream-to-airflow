@@ -20,11 +20,13 @@ from __future__ import annotations
 import logging
 from typing import Annotated, cast
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.status import HTTP_401_UNAUTHORIZED
 
 from airflow.api_fastapi.app import get_auth_manager
 from airflow.api_fastapi.auth.managers.base_auth_manager import COOKIE_NAME_JWT_TOKEN
+from airflow.api_fastapi.auth.managers.exceptions import AuthManagerRefreshTokenExpiredException
 from airflow.api_fastapi.common.router import AirflowRouter
 from airflow.api_fastapi.core_api.security import get_user
 from airflow.providers.common.compat.sdk import conf
@@ -123,7 +125,10 @@ def refresh(
 ) -> RedirectResponse:
     """Refresh the token."""
     auth_manager = cast("KeycloakAuthManager", get_auth_manager())
-    refreshed_user = auth_manager.refresh_user(user=user)
+    try:
+        refreshed_user = auth_manager.refresh_user(user=user)
+    except AuthManagerRefreshTokenExpiredException:
+        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED, detail="Refresh token Expired")
     redirect_url = request.query_params.get("next", conf.get("api", "base_url", fallback="/"))
     response = RedirectResponse(url=redirect_url, status_code=303)
 

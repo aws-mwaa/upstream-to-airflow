@@ -25,12 +25,14 @@ from urllib.parse import urljoin
 
 import requests
 from fastapi import FastAPI
-from keycloak import KeycloakOpenID, KeycloakPostError
+from keycloak import KeycloakOpenID
+from keycloak.exceptions import KeycloakPostError
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 from airflow.api_fastapi.app import AUTH_MANAGER_FASTAPI_APP_PREFIX
 from airflow.api_fastapi.auth.managers.base_auth_manager import BaseAuthManager
+from airflow.api_fastapi.auth.managers.exceptions import AuthManagerRefreshTokenExpiredException
 
 try:
     from airflow.api_fastapi.auth.managers.base_auth_manager import ExtendedResourceMethod
@@ -162,13 +164,7 @@ class KeycloakAuthManager(BaseAuthManager[KeycloakAuthManagerUser]):
             client = self.get_keycloak_client()
             return client.refresh_token(user.refresh_token)
         except KeycloakPostError as exc:
-            log.warning(
-                "KeycloakPostError encountered during token refresh. "
-                "Suppressing the exception and returning None.",
-                exc_info=exc,
-            )
-
-        return {}
+            raise AuthManagerRefreshTokenExpiredException(exc)
 
     def is_authorized_configuration(
         self,
@@ -396,6 +392,9 @@ class KeycloakAuthManager(BaseAuthManager[KeycloakAuthManagerUser]):
 
         if resp.status_code == 200:
             return {(perm["scopes"][0], perm["rsname"]) for perm in resp.json()}
+        if resp.status_code == 401:
+            log.debug("Received 401 from Keycloak: %s", resp.text)
+            return set()
         if resp.status_code == 403:
             return set()
         if resp.status_code == 400:
