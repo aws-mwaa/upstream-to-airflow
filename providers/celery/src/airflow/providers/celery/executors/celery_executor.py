@@ -143,7 +143,7 @@ class CeleryExecutor(BaseExecutor):
         from airflow.executors.workloads import ExecuteCallback, ExecuteTask
         from airflow.providers.celery.executors.celery_executor_utils import execute_workload
 
-        tasks = []
+        tasks: list[TaskInstanceInCelery] = []
         for workload in workloads:
             if isinstance(workload, ExecuteTask):
                 tasks.append((workload.ti.key, workload, workload.ti.queue, execute_workload))
