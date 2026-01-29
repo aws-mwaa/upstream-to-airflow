@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from airflow._shared.configuration.exceptions import AirflowConfigException
 from airflow.cli import cli_parser
 from airflow.configuration import conf
 from airflow.executors import executor_loader
@@ -276,6 +277,25 @@ class TestWorkerMultiTeam:
         assert len(global_conf_calls) == 0, (
             f"Global conf should not be used in multi-team mode, but was called: {global_conf_calls}"
         )
+
+    # Test which covers the scenario of a new provider that supports teams running on an older version of
+    # Airflow. It should be run only on Airflow versions below 3.2 and above or equal to 2.11. We should
+    # expect the worker to throw an Airflow configuration exception.
+    @pytest.mark.skipif(AIRFLOW_V_3_2_PLUS or not AIRFLOW_V_3_0_PLUS, reason="Test requires Airflow 2.11-3.1")
+    def test_worker_with_team_raises_on_older_airflow_versions(self):
+        args = self.parser.parse_args(
+            [
+                "celery",
+                "worker",
+                "--team",
+                "team_a",
+            ]
+        )
+
+        with pytest.raises(AirflowConfigException) as exc_info:
+            celery_command.worker(args)
+
+        assert "Multi-team Celery workers require Airflow version 3.2 or higher" in str(exc_info.value)
 
 
 @pytest.mark.backend("mysql", "postgres")
