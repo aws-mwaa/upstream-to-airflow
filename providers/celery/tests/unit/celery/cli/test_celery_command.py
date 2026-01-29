@@ -28,9 +28,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from airflow._shared.configuration.exceptions import AirflowConfigException
 from airflow.cli import cli_parser
 from airflow.configuration import conf
+from airflow.exceptions import AirflowConfigException
 from airflow.executors import executor_loader
 from airflow.providers.celery.cli import celery_command
 from airflow.providers.celery.cli.celery_command import _run_stale_bundle_cleanup
