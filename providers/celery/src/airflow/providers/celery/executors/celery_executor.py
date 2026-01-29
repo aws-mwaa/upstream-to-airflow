@@ -141,6 +141,7 @@ class CeleryExecutor(BaseExecutor):
     def _process_workloads(self, workloads: Sequence[workloads.All]) -> None:
         # Airflow V3 version -- have to delay imports until we know we are on v3
         from airflow.executors.workloads import ExecuteCallback, ExecuteTask
+        from airflow.models.taskinstancekey import TaskInstanceKey
         from airflow.providers.celery.executors.celery_executor_utils import execute_workload
 
         tasks: list[TaskInstanceInCelery] = []
@@ -149,11 +150,9 @@ class CeleryExecutor(BaseExecutor):
                 tasks.append((workload.ti.key, workload, workload.ti.queue, execute_workload))
             elif isinstance(workload, ExecuteCallback):
                 # For callbacks, use a synthetic key based on callback ID
-                from airflow.models.taskinstancekey import TaskInstanceKey
-
                 callback_key = TaskInstanceKey(
                     dag_id="callback",
-                    task_id=str(workload.callback.id),
+                    task_id=workload.callback.id,
                     run_id="callback",
                     try_number=1,
                     map_index=-1,
@@ -386,7 +385,7 @@ class CeleryExecutor(BaseExecutor):
             # For callbacks, use a synthetic key based on callback ID
             callback_key = TaskInstanceKey(
                 dag_id="callback",
-                task_id=str(workload.callback.id),
+                task_id=workload.callback.id,
                 run_id="callback",
                 try_number=1,
                 map_index=-1,
