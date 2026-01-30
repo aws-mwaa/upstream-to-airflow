@@ -30,7 +30,6 @@ import pytest
 
 from airflow.cli import cli_parser
 from airflow.configuration import conf
-from airflow.exceptions import AirflowConfigException
 from airflow.executors import executor_loader
 from airflow.providers.celery.cli import celery_command
 from airflow.providers.celery.cli.celery_command import _run_stale_bundle_cleanup
@@ -292,7 +291,7 @@ class TestWorkerMultiTeam:
             ]
         )
 
-        with pytest.raises(AirflowConfigException) as exc_info:
+        with pytest.raises(SystemExit) as exc_info:
             celery_command.worker(args)
 
         assert "Multi-team Celery workers require Airflow version 3.2 or higher" in str(exc_info.value)
