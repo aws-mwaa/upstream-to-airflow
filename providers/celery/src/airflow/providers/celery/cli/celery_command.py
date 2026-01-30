@@ -194,13 +194,13 @@ def worker(args):
         # Multi-team is enabled, create team-specific Celery app and use team based config
         # This requires Airflow 3.2+, and core.multi_team config to be true to be enabled.
         if not AIRFLOW_V_3_2_PLUS:
-            raise AirflowConfigException(
-                "Multi-team Celery workers require Airflow version 3.2 or higher. "
+            raise SystemExit(
+                "Error: Multi-team Celery workers require Airflow version 3.2 or higher. "
                 "Please upgrade your Airflow installation or remove the --team argument."
             )
         if not conf.getboolean("core", "multi_team", fallback=False):
-            raise AirflowConfigException(
-                "Multi-team Celery workers require core.multi_team configuration to be enabled. "
+            raise SystemExit(
+                "Error: Multi-team Celery workers require core.multi_team configuration to be enabled. "
                 "Please enable core.multi_team in your Airflow config or remove the --team argument."
             )
         from airflow.executors.base_executor import ExecutorConf

@@ -103,7 +103,7 @@ ARG_WITHOUT_GOSSIP = Arg(
 )
 ARG_TEAM = Arg(
     ("-t", "--team"),
-    help="Team name for team-specific multi-team configuration (requires Airflow 3.1+)",
+    help="Team name for team-specific multi-team configuration (requires Airflow 3.2+)",
 )
 ARG_OUTPUT = Arg(
     (
