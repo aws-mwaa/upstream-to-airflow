@@ -418,6 +418,68 @@ class SerializedDagModel(Base):
         return uuid_mapping
 
     @classmethod
+    def _try_reuse_deadline_uuids(
+        cls,
+        existing_deadline_uuids: list[str],
+        new_deadline_data: list[dict],
+        session: Session,
+    ) -> dict[str, dict] | None:
+        """
+        Try to reuse existing deadline UUIDs if the deadline definitions haven't changed.
+
+        Returns None if Deadline hashes are not all identical, indicating they need to be updated.
+
+        :param existing_deadline_uuids: List of UUID strings from existing serialized dag
+        :param new_deadline_data: List of new deadline alert data dicts from the DAG
+        :param session: Database session
+        :return: UUID mapping dict if all match, None if any mismatch detected
+        """
+        if len(existing_deadline_uuids) != len(new_deadline_data):
+            return None
+
+        existing_alerts = session.scalars(
+            select(DeadlineAlertModel).where(DeadlineAlertModel.id.in_(existing_deadline_uuids))
+        ).all()
+
+        if len(existing_alerts) != len(existing_deadline_uuids):
+            return None
+
+        new_alerts_temp = []
+        for deadline_alert in new_deadline_data:
+            deadline_data = deadline_alert.get(Encoding.VAR, deadline_alert)
+            # Create a temporary alert for comparison
+            temp_alert = DeadlineAlertModel(
+                id="temp",  # id is required for the object but isn't included in the __eq__
+                reference=deadline_data[DeadlineAlertFields.REFERENCE],
+                interval=deadline_data[DeadlineAlertFields.INTERVAL],
+                callback_def=deadline_data[DeadlineAlertFields.CALLBACK],
+            )
+            new_alerts_temp.append((temp_alert, deadline_data))
+
+        matched_uuids = set()
+        uuid_mapping = {}
+
+        for new_alert_temp, deadline_data in new_alerts_temp:
+            # Find a matching existing alert using DeadlineAlert.__eq__
+            found_match = False
+            for existing_alert in existing_alerts:
+                if existing_alert.id in matched_uuids:
+                    continue  # Already matched to another new deadline
+
+                if new_alert_temp == existing_alert:
+                    # Found a match, reuse this UUID
+                    uuid_mapping[str(existing_alert.id)] = deadline_data
+                    matched_uuids.add(existing_alert.id)
+                    found_match = True
+                    break
+
+            if not found_match:
+                # New deadline data doesn't match any existing alert, need new UUIDs
+                return None
+
+        return uuid_mapping
+
+    @classmethod
     def _create_deadline_alert_records(
         cls,
         serialized_dag: SerializedDagModel,
@@ -491,8 +553,8 @@ class SerializedDagModel(Base):
         )
 
         if dag.data.get("dag", {}).get("deadline"):
-            # If this DAG has been serialized before then reuse deadline UUIDs to preserve the hash,
-            # otherwise we have new serialized dags getting generated constantly.
+            # Try to reuse existing deadline UUIDs if the deadline definitions haven't changed.
+            # This preserves the hash and avoids unnecessary SerializedDagModel recreations.
             existing_serialized_dag = session.scalar(
                 select(cls).where(cls.dag_id == dag.dag_id).order_by(cls.created_at.desc()).limit(1)
             )
@@ -502,9 +564,20 @@ class SerializedDagModel(Base):
                 and existing_serialized_dag.data
                 and (existing_deadline_uuids := existing_serialized_dag.data.get("dag", {}).get("deadline"))
             ):
-                dag.data["dag"]["deadline"] = existing_deadline_uuids
-                deadline_uuid_mapping = {}
+                deadline_uuid_mapping = cls._try_reuse_deadline_uuids(
+                    existing_deadline_uuids,
+                    dag.data["dag"]["deadline"],
+                    session,
+                )
+
+                if deadline_uuid_mapping is not None:
+                    # All deadlines matched, reuse the UUIDs to preserve hash.
+                    dag.data["dag"]["deadline"] = list(deadline_uuid_mapping.keys())
+                else:
+                    # At least one deadline has changed, generate new UUIDs and update the hash.
+                    deadline_uuid_mapping = cls._generate_deadline_uuids(dag.data)
             else:
+                # First time seeing this DAG with deadlines, generate new UUIDs and update the hash.
                 deadline_uuid_mapping = cls._generate_deadline_uuids(dag.data)
         else:
             deadline_uuid_mapping = {}
