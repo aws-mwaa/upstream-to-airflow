@@ -429,8 +429,8 @@ class SerializedDagModel(Base):
 
         Returns None if Deadline hashes are not all identical, indicating they need to be updated.
 
-        :param existing_deadline_uuids: List of UUID strings from existing serialized dag
-        :param new_deadline_data: List of new deadline alert data dicts from the DAG
+        :param existing_deadline_uuids: List of UUID strings from existing serialized Dag
+        :param new_deadline_data: List of new deadline alert data dicts from the Dag
         :param session: Database session
         :return: UUID mapping dict if all match, None if any mismatch detected
         """
@@ -577,7 +577,7 @@ class SerializedDagModel(Base):
                     # At least one deadline has changed, generate new UUIDs and update the hash.
                     deadline_uuid_mapping = cls._generate_deadline_uuids(dag.data)
             else:
-                # First time seeing this DAG with deadlines, generate new UUIDs and update the hash.
+                # First time seeing this Dag with deadlines, generate new UUIDs and update the hash.
                 deadline_uuid_mapping = cls._generate_deadline_uuids(dag.data)
         else:
             deadline_uuid_mapping = {}

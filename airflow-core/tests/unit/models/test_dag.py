@@ -1889,7 +1889,7 @@ my_postgres_conn:
         assert dr.deadlines[0].deadline_time == getattr(dr, reference_column, DEFAULT_DATE) + interval
 
     def test_dag_with_multiple_deadlines(self, testing_dag_bundle, session):
-        """Test that a DAG with multiple deadlines stores all deadlines and persists on re-serialization."""
+        """Test that a Dag with multiple deadlines stores all deadlines and persists on re-serialization."""
         deadlines = [
             DeadlineAlert(
                 reference=DeadlineReference.DAGRUN_QUEUED_AT,
@@ -1921,7 +1921,7 @@ my_postgres_conn:
         assert len(deadline_alerts) == expected_num_deadlines
         initial_uuids = {alert.id for alert in deadline_alerts}
 
-        # Re-serialize the DAG
+        # Re-serialize the Dag
         SerializedDagModel.write_dag(
             LazyDeserializedDAG.from_dag(dag),
             bundle_name="testing",

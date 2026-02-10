@@ -66,7 +66,7 @@ async def empty_callback_for_deadline():
 
 # To move it to a shared module.
 def make_example_dags(module):
-    """Loads DAGs from a module for test."""
+    """Loads Dags from a module for test."""
     from airflow.models.dagbundle import DagBundleModel
     from airflow.utils.session import create_session
 
@@ -767,7 +767,7 @@ class TestSerializedDagModel:
     def test_deadline_interval_change_triggers_new_serdag(self, testing_dag_bundle, session):
         dag_id = "test_interval_change"
 
-        # Create a new Dag with a deadline and create a dagrun as a baseline..
+        # Create a new Dag with a deadline and create a dagrun as a baseline.
         dag = DAG(
             dag_id=dag_id,
             deadline=DeadlineAlert(
