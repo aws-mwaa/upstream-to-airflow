@@ -437,8 +437,9 @@ class SerializedDagModel(Base):
         if len(existing_deadline_uuids) != len(new_deadline_data):
             return None
 
+        existing_deadline_uuids_as_uuid = [UUID(uid) for uid in existing_deadline_uuids]
         existing_alerts = session.scalars(
-            select(DeadlineAlertModel).where(DeadlineAlertModel.id.in_(existing_deadline_uuids))
+            select(DeadlineAlertModel).where(DeadlineAlertModel.id.in_(existing_deadline_uuids_as_uuid))
         ).all()
 
         if len(existing_alerts) != len(existing_deadline_uuids):
@@ -572,7 +573,7 @@ class SerializedDagModel(Base):
 
                 if deadline_uuid_mapping is not None:
                     # All deadlines matched, reuse the UUIDs to preserve hash.
-                    dag.data["dag"]["deadline"] = list(deadline_uuid_mapping.keys())
+                    dag.data["dag"]["deadline"] = existing_deadline_uuids
                 else:
                     # At least one deadline has changed, generate new UUIDs and update the hash.
                     deadline_uuid_mapping = cls._generate_deadline_uuids(dag.data)
@@ -619,6 +620,15 @@ class SerializedDagModel(Base):
             if getattr(result, "rowcount", 0) == 0:
                 # No rows updated - serialized DAG doesn't exist
                 return False
+
+            if deadline_uuid_mapping:
+                updated_serialized_dag = session.scalar(
+                    select(cls).where(cls.dag_version_id == dag_version.id)
+                )
+                if updated_serialized_dag:
+                    updated_serialized_dag.deadline_alerts.clear()
+                    cls._create_deadline_alert_records(updated_serialized_dag, deadline_uuid_mapping)
+
             # The dag_version and dag_code may not have changed, still we should
             # do the below actions:
             # Update the latest dag version
