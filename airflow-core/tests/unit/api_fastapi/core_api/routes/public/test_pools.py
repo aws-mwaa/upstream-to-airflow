@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import func, select
 
 from airflow.models.pool import Pool
 from airflow.utils.session import provide_session
