@@ -1,6 +1,6 @@
 
 #
-# This constraints file was automatically generated on 2026-02-16T15:28:14.623862
+# This constraints file was automatically generated on 2026-02-16T17:43:25.807338
 # via "eager-upgrade" mechanism of PIP. For the "v2-11-test" branch of Airflow.
 # This variant of constraints install uses the HEAD of the branch version of both
 # 'apache-airflow' package and all available community provider packages.
@@ -625,7 +625,7 @@ uv==0.9.11
 validators==0.35.0
 vertica-python==1.4.0
 vine==5.1.0
-virtualenv==20.36.1
+virtualenv==20.37.0
 watchtower==3.4.0
 wcwidth==0.6.0
 weaviate-client==4.19.2
