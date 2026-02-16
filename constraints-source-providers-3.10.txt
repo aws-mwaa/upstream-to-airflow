@@ -1,6 +1,6 @@
 
 #
-# This constraints file was automatically generated on 2026-02-15T19:42:01.839592
+# This constraints file was automatically generated on 2026-02-16T01:04:07.464329
 # via `uv sync --resolution highest for the "v3-1-test" branch of Airflow.
 # This variant of constraints install uses the HEAD of the branch version of both
 # 'apache-airflow' package and all available community provider distributions.
@@ -208,7 +208,7 @@ fastavro==1.12.1
 fasteners==0.20
 fastjsonschema==2.21.2
 fastuuid==0.14.0
-filelock==3.24.0
+filelock==3.24.1
 flit==3.12.0
 flit_core==3.12.0
 flower==2.0.1
