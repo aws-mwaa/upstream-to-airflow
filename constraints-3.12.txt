@@ -1,6 +1,6 @@
 
 #
-# This constraints file was automatically generated on 2026-02-17T14:17:08.883055
+# This constraints file was automatically generated on 2026-02-17T20:03:16.253798
 # via `uv pip install --resolution highest` for the "main" branch of Airflow.
 # This variant of constraints install uses the HEAD of the branch version for 'apache-airflow' but installs
 # the providers from PIP-released packages at the moment of the constraint generation.
@@ -138,6 +138,7 @@ apache-airflow-providers-facebook==3.9.2
 apache-airflow-providers-ftp==3.14.1
 apache-airflow-providers-git==0.2.3
 apache-airflow-providers-github==2.11.0
+apache-airflow-providers-google==19.5.0
 apache-airflow-providers-grpc==3.9.2
 apache-airflow-providers-hashicorp==4.5.0
 apache-airflow-providers-imap==3.11.0
