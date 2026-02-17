@@ -39,7 +39,7 @@ Here's the list of all the Database Migrations that are executed via when you ru
 +-------------------------+------------------+-------------------+--------------------------------------------------------------+
 | Revision ID             | Revises ID       | Airflow Version   | Description                                                  |
 +=========================+==================+===================+==============================================================+
-| ``82dbd68e6171`` (head) | ``cc92b33c6709`` | ``3.1.8``         | Add index to task_reschedule ti_id .                         |
+| ``82dbd68e6171`` (head) | ``cc92b33c6709`` | ``3.1.8``         | Add composite index (ti_id, id DESC) to task_reschedule.     |
 +-------------------------+------------------+-------------------+--------------------------------------------------------------+
 | ``cc92b33c6709``        | ``eaf332f43c7c`` | ``3.1.0``         | Add backward compatibility for serialized DAG format v3 to   |
 |                         |                  |                   | v2.                                                          |
