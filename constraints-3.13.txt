@@ -1,6 +1,6 @@
 
 #
-# This constraints file was automatically generated on 2026-02-17T11:28:28.301972
+# This constraints file was automatically generated on 2026-02-17T20:00:22.381905
 # via `uv pip install --resolution highest` for the "v3-1-test" branch of Airflow.
 # This variant of constraints install uses the HEAD of the branch version for 'apache-airflow' but installs
 # the providers from PIP-released packages at the moment of the constraint generation.
@@ -228,7 +228,6 @@ bleach==6.3.0
 blinker==1.9.0
 boto3==1.42.49
 botocore==1.42.49
-build==1.4.0
 cachetools==7.0.1
 cadwyn==5.4.6
 cassandra-driver==3.29.3
@@ -453,9 +452,9 @@ nest-asyncio==1.6.0
 numpy==2.4.2
 oauthlib==3.3.1
 openai==2.21.0
-openlineage-integration-common==1.43.0
-openlineage-python==1.43.0
-openlineage_sql==1.43.0
+openlineage-integration-common==1.44.0
+openlineage-python==1.44.0
+openlineage_sql==1.44.0
 openpyxl==3.1.5
 opensearch-protobufs==0.19.0
 opensearch-py==3.1.0
@@ -531,7 +530,6 @@ pymssql==2.3.13
 pyodbc==5.3.0
 pyodps==0.12.5.1
 pyparsing==3.3.2
-pyproject_hooks==1.2.0
 pypsrp==0.9.0
 pyspark==4.1.1
 pyspnego==0.12.0
@@ -647,7 +645,7 @@ vine==5.1.0
 watchfiles==1.1.1
 watchtower==3.4.0
 wcwidth==0.6.0
-weaviate-client==4.19.2
+weaviate-client==4.19.3
 webencodings==0.5.1
 websocket-client==1.8.0
 websockets==15.0.1
