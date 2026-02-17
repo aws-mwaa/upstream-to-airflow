@@ -1,6 +1,6 @@
 
 #
-# This constraints file was automatically generated on 2026-02-16T19:59:50.429810
+# This constraints file was automatically generated on 2026-02-17T02:33:13.476204
 # via `uv pip install --resolution highest` for the "main" branch of Airflow.
 # This variant of constraints install uses the HEAD of the branch version for 'apache-airflow' but installs
 # the providers from PIP-released packages at the moment of the constraint generation.
@@ -84,6 +84,7 @@ ansicolors==1.1.8
 anyio==4.12.1
 apache-airflow-providers-airbyte==5.3.2
 apache-airflow-providers-alibaba==3.3.4
+apache-airflow-providers-apache-beam==6.2.2
 apache-airflow-providers-apache-cassandra==3.9.2
 apache-airflow-providers-apache-drill==3.2.1
 apache-airflow-providers-apache-druid==4.4.2
@@ -410,7 +411,7 @@ kylinpy==2.8.4
 lazy-object-proxy==1.12.0
 libcst==1.8.6
 linkify-it-py==2.0.3
-litellm==1.81.12
+litellm==1.81.13
 lockfile==0.12.2
 looker_sdk==26.2.0
 lxml==5.4.0
@@ -632,8 +633,8 @@ tornado==6.5.4
 tqdm==4.67.3
 traitlets==5.14.3
 trino==0.336.0
-typer-slim==0.23.2
-typer==0.23.2
+typer-slim==0.24.0
+typer==0.24.0
 types-protobuf==6.32.1.20251210
 types-requests==2.32.4.20260107
 typing-inspect==0.9.0
@@ -647,7 +648,7 @@ uritemplate==4.2.0
 urllib3==2.6.3
 uuid6==2025.0.1
 uv==0.10.3
-uvicorn==0.40.0
+uvicorn==0.41.0
 uvloop==0.22.1
 validators==0.35.0
 vertica-python==1.4.0
