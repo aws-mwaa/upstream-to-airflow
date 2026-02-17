@@ -1,6 +1,6 @@
 
 #
-# This constraints file was automatically generated on 2026-02-16T13:16:08.954840
+# This constraints file was automatically generated on 2026-02-17T11:27:32.799767
 # via `uv pip install --resolution highest` for the "v3-1-test" branch of Airflow.
 # This variant of constraints install uses the HEAD of the branch version for 'apache-airflow' but installs
 # the providers from PIP-released packages at the moment of the constraint generation.
@@ -302,7 +302,7 @@ et_xmlfile==2.0.0
 eventlet==0.40.4
 executing==2.2.1
 facebook_business==24.0.1
-fastapi-cli==0.0.21
+fastapi-cli==0.0.23
 fastapi==0.117.1
 fastavro==1.12.1
 fasteners==0.20
@@ -445,7 +445,7 @@ lazy-object-proxy==1.12.0
 libcst==1.8.6
 limits==5.8.0
 linkify-it-py==2.0.3
-litellm==1.81.12
+litellm==1.81.13
 lockfile==0.12.2
 looker_sdk==26.2.0
 lxml==6.0.2
@@ -554,7 +554,7 @@ pyarrow==18.1.0
 pyasn1==0.6.2
 pyasn1_modules==0.4.2
 pybreaker==1.4.1
-pycountry==24.6.1
+pycountry==26.2.16
 pycparser==3.0
 pycryptodome==3.23.0
 pydantic==2.12.5
@@ -570,7 +570,7 @@ pyodbc==5.3.0
 pyodps==0.12.5.1
 pyparsing==3.3.2
 pyproject_hooks==1.2.0
-pypsrp==0.8.1
+pypsrp==0.9.0
 pyspark==4.1.1
 pyspnego==0.12.0
 python-arango==8.3.0
@@ -664,8 +664,8 @@ tornado==6.5.4
 tqdm==4.67.3
 traitlets==5.14.3
 trino==0.336.0
-typer-slim==0.23.1
-typer==0.23.1
+typer-slim==0.24.0
+typer==0.24.0
 types-protobuf==6.32.1.20251210
 types-requests==2.32.4.20260107
 typing-inspect==0.9.0
@@ -679,12 +679,12 @@ uritemplate==4.2.0
 urllib3==2.6.3
 uuid6==2025.0.1
 uv==0.10.3
-uvicorn==0.40.0
+uvicorn==0.41.0
 uvloop==0.22.1
 validators==0.35.0
 vertica-python==1.4.0
 vine==5.1.0
-virtualenv==20.36.1
+virtualenv==20.37.0
 watchfiles==1.1.1
 watchtower==3.4.0
 wcwidth==0.6.0
