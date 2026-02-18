@@ -1,6 +1,6 @@
 
 #
-# This constraints file was automatically generated on 2026-02-18T08:01:52.715402
+# This constraints file was automatically generated on 2026-02-18T20:01:46.440367
 # via `uv pip install --resolution highest` for the "main" branch of Airflow.
 # This variant of constraints install uses the HEAD of the branch version for 'apache-airflow' but installs
 # the providers from PIP-released packages at the moment of the constraint generation.
@@ -206,7 +206,7 @@ attrs==25.4.0
 awswrangler==3.15.1
 azure-batch==14.2.0
 azure-common==1.1.28
-azure-core==1.38.1
+azure-core==1.38.2
 azure-cosmos==4.14.6
 azure-datalake-store==0.0.53
 azure-identity==1.25.2
@@ -258,7 +258,7 @@ click-repl==0.3.0
 click==8.3.1
 clickclick==20.10.2
 cloudpickle==2.2.1
-cohere==5.20.5
+cohere==5.20.6
 colorama==0.4.6
 colorful==0.5.8
 colorlog==6.10.1
@@ -688,11 +688,11 @@ uvloop==0.22.1
 validators==0.35.0
 vertica-python==1.4.0
 vine==5.1.0
-virtualenv==20.37.0
+virtualenv==20.36.1
 watchfiles==1.1.1
 watchtower==3.4.0
 wcwidth==0.6.0
-weaviate-client==4.19.3
+weaviate-client==4.19.4
 webencodings==0.5.1
 websocket-client==1.9.0
 websockets==15.0.1
