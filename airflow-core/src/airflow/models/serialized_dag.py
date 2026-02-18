@@ -448,9 +448,9 @@ class SerializedDagModel(Base):
         new_alerts_temp = []
         for deadline_alert in new_deadline_data:
             deadline_data = deadline_alert.get(Encoding.VAR, deadline_alert)
-            # Create a temporary alert for comparison
+            # Create a temporary alert for definition comparison
             temp_alert = DeadlineAlertModel(
-                id="temp",  # id is required for the object but isn't included in the __eq__
+                id="temp",  # id is required for the object but isn't used by matches_definition
                 reference=deadline_data[DeadlineAlertFields.REFERENCE],
                 interval=deadline_data[DeadlineAlertFields.INTERVAL],
                 callback_def=deadline_data[DeadlineAlertFields.CALLBACK],
@@ -461,13 +461,13 @@ class SerializedDagModel(Base):
         uuid_mapping = {}
 
         for new_alert_temp, deadline_data in new_alerts_temp:
-            # Find a matching existing alert using DeadlineAlert.__eq__
+            # Find a matching existing alert using DeadlineAlert.matches_definition
             found_match = False
             for existing_alert in existing_alerts:
                 if existing_alert.id in matched_uuids:
                     continue  # Already matched to another new deadline
 
-                if new_alert_temp == existing_alert:
+                if new_alert_temp.matches_definition(existing_alert):
                     # Found a match, reuse this UUID
                     uuid_mapping[str(existing_alert.id)] = deadline_data
                     matched_uuids.add(existing_alert.id)
