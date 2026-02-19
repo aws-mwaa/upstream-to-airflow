@@ -26,6 +26,7 @@ from collections.abc import Callable
 from functools import partial
 from unittest import mock
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -1283,15 +1284,34 @@ class TestAwsEcsExecutor:
             task.key = mock.Mock(spec=TaskInstanceKey)
             task.queue = "default"
             task.executor_config = {}
+            task.id = uuid4()
+            task.dag_version_id = uuid4()
+            task.task_id = f"task_{idx}"
+            task.dag_id = "test_dag"
+            task.run_id = "test_run"
+            task.map_index = -1
+            task.pool_slots = 1
+            task.priority_weight = 1
+            task.context_carrier = {}
+            task.queued_dttm = dt.datetime.now()
+            # Set up nested attributes for BundleInfo
+            task.dag_model = mock.Mock()
+            task.dag_model.bundle_name = "test_bundle"
+            task.dag_model.relative_fileloc = "test_dag.py"
+            task.dag_run = mock.Mock()
+            task.dag_run.bundle_version = "1.0.0"
+            task.dag_run.context_carrier = {}
 
             # Mock command generation based on Airflow version
-            if AIRFLOW_V_3_0_PLUS:
-                # For Airflow 3.x, _build_task_command will be called
-                pass  # The mock_executor will handle this via our new helper method
-            else:
+            if not AIRFLOW_V_3_0_PLUS:
                 # For Airflow 2.x, command_as_list will be called
                 task.command_as_list.return_value = [
-                    "airflow", "tasks", "run", "dag", f"task_{idx}", "2024-01-01"
+                    "airflow",
+                    "tasks",
+                    "run",
+                    "dag",
+                    f"task_{idx}",
+                    "2024-01-01",
                 ]
 
         not_adopted_tasks = mock_executor.try_adopt_task_instances(orphaned_tasks)
