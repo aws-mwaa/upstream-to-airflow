@@ -1,6 +1,6 @@
 
 #
-# This constraints file was automatically generated on 2026-02-19T08:02:53.643067
+# This constraints file was automatically generated on 2026-02-20T08:01:19.002599
 # via `uv pip install --resolution highest` for the "main" branch of Airflow.
 # This variant of constraints install uses the HEAD of the branch version for 'apache-airflow' but installs
 # the providers from PIP-released packages at the moment of the constraint generation.
@@ -48,7 +48,7 @@ Jinja2==3.1.6
 Mako==1.3.10
 Markdown==3.10.2
 MarkupSafe==3.0.3
-PyAthena==3.27.2
+PyAthena==3.28.0
 PyGithub==2.8.1
 PyHive==0.7.0
 PyJWT==2.11.0
@@ -210,7 +210,7 @@ azure-cosmos==4.14.6
 azure-datalake-store==0.0.53
 azure-identity==1.25.2
 azure-keyvault-secrets==4.10.0
-azure-kusto-data==6.0.1
+azure-kusto-data==6.0.2
 azure-mgmt-containerinstance==10.1.0
 azure-mgmt-containerregistry==14.0.0
 azure-mgmt-core==1.6.0
@@ -327,7 +327,7 @@ google-cloud-audit-log==0.4.0
 google-cloud-automl==2.18.1
 google-cloud-batch==0.20.0
 google-cloud-bigquery-datatransfer==3.21.0
-google-cloud-bigquery-storage==2.36.1
+google-cloud-bigquery-storage==2.36.2
 google-cloud-bigquery==3.40.1
 google-cloud-bigtable==2.35.0
 google-cloud-build==3.35.0
@@ -339,9 +339,9 @@ google-cloud-dataflow-client==0.11.0
 google-cloud-dataform==0.9.0
 google-cloud-dataplex==2.16.0
 google-cloud-dataproc-metastore==1.21.0
-google-cloud-dataproc==5.24.0
+google-cloud-dataproc==5.25.0
 google-cloud-dlp==3.34.0
-google-cloud-kms==3.10.0
+google-cloud-kms==3.11.0
 google-cloud-language==2.19.0
 google-cloud-logging==3.13.0
 google-cloud-managedkafka==0.3.0
@@ -376,7 +376,7 @@ grpc-google-iam-v1==0.14.3
 grpc-interceptor==0.15.4
 grpcio-gcp==0.2.2
 grpcio-status==1.62.3
-grpcio==1.78.0
+grpcio==1.78.1
 gssapi==1.11.1
 gunicorn==25.1.0
 h11==0.16.0
@@ -553,7 +553,7 @@ pycountry==26.2.16
 pycparser==3.0
 pycryptodome==3.23.0
 pydantic-extra-types==2.11.0
-pydantic-settings==2.13.0
+pydantic-settings==2.13.1
 pydantic==2.12.5
 pydantic_core==2.41.5
 pydata-google-auth==1.9.1
@@ -588,13 +588,13 @@ pytokens==0.4.1
 pytz==2025.2
 pywinrm==0.5.0
 pyzmq==27.1.0
-qdrant-client==1.16.2
+qdrant-client==1.17.0
 ray==2.47.1
 reactivex==4.1.0
 redis==5.3.1
 redshift-connector==2.1.7
 referencing==0.37.0
-regex==2026.1.15
+regex==2026.2.19
 requests-file==3.0.1
 requests-kerberos==0.15.0
 requests-oauthlib==2.0.0
@@ -703,9 +703,9 @@ yandex-query-client==0.1.4
 yandexcloud==0.328.0
 yarl==1.22.0
 ydb-dbapi==0.1.19
-ydb==3.26.4
+ydb==3.26.5
 zeep==4.3.2
-zenpy==2.0.56
+zenpy==2.0.57
 zipp==3.23.0
 zope.event==6.1
 zope.interface==8.2
