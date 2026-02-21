@@ -21,7 +21,7 @@
 
 .. towncrier release notes start
 
-Airflow 2.11.1 (2026-02-14)
+Airflow 2.11.1 (2026-02-20)
 ---------------------------
 
 Significant Changes
