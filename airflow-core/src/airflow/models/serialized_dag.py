@@ -434,6 +434,15 @@ class SerializedDagModel(Base):
         :param session: Database session
         :return: UUID mapping dict if all match, None if any mismatch detected
         """
+
+        def _definitions_match(deadline_data: dict, existing: DeadlineAlertModel) -> bool:
+            """Check if raw deadline data matches an existing DeadlineAlert's definition."""
+            return (
+                deadline_data[DeadlineAlertFields.REFERENCE] == existing.reference
+                and deadline_data[DeadlineAlertFields.INTERVAL] == existing.interval
+                and deadline_data[DeadlineAlertFields.CALLBACK] == existing.callback_def
+            )
+
         if len(existing_deadline_uuids) != len(new_deadline_data):
             return None
 
@@ -445,29 +454,18 @@ class SerializedDagModel(Base):
         if len(existing_alerts) != len(existing_deadline_uuids):
             return None
 
-        new_alerts_temp = []
+        matched_uuids: set[UUID] = set()
+        uuid_mapping: dict[str, dict] = {}
+
         for deadline_alert in new_deadline_data:
             deadline_data = deadline_alert.get(Encoding.VAR, deadline_alert)
-            # Create a temporary alert for definition comparison
-            temp_alert = DeadlineAlertModel(
-                id="temp",  # id is required for the object but isn't used by matches_definition
-                reference=deadline_data[DeadlineAlertFields.REFERENCE],
-                interval=deadline_data[DeadlineAlertFields.INTERVAL],
-                callback_def=deadline_data[DeadlineAlertFields.CALLBACK],
-            )
-            new_alerts_temp.append((temp_alert, deadline_data))
 
-        matched_uuids = set()
-        uuid_mapping = {}
-
-        for new_alert_temp, deadline_data in new_alerts_temp:
-            # Find a matching existing alert using DeadlineAlert.matches_definition
             found_match = False
             for existing_alert in existing_alerts:
                 if existing_alert.id in matched_uuids:
                     continue  # Already matched to another new deadline
 
-                if new_alert_temp.matches_definition(existing_alert):
+                if _definitions_match(deadline_data, existing_alert):
                     # Found a match, reuse this UUID
                     uuid_mapping[str(existing_alert.id)] = deadline_data
                     matched_uuids.add(existing_alert.id)
@@ -475,7 +473,9 @@ class SerializedDagModel(Base):
                     break
 
             if not found_match:
-                # New deadline data doesn't match any existing alert, need new UUIDs
+                # Any mismatch triggers full regeneration of all UUIDs. This is intentional:
+                # deadlines may be interdependent (e.g. a custom DeadlineReference relative
+                # to another deadline), so partial reuse would risk stale cross-references.
                 return None
 
         return uuid_mapping
@@ -572,8 +572,11 @@ class SerializedDagModel(Base):
                 )
 
                 if deadline_uuid_mapping is not None:
-                    # All deadlines matched, reuse the UUIDs to preserve hash.
+                    # All deadlines matched — reuse the UUIDs to preserve hash.
+                    # Clear the mapping since the alert rows already exist in the DB;
+                    # no need to delete and recreate identical records.
                     dag.data["dag"]["deadline"] = existing_deadline_uuids
+                    deadline_uuid_mapping = {}
                 else:
                     # At least one deadline has changed, generate new UUIDs and update the hash.
                     deadline_uuid_mapping = cls._generate_deadline_uuids(dag.data)
