@@ -21,13 +21,30 @@ from __future__ import annotations
 import sys
 import time
 from importlib import import_module
-from typing import TYPE_CHECKING, BinaryIO, ClassVar, Protocol
+from typing import TYPE_CHECKING, Annotated, BinaryIO, ClassVar, Protocol
 from uuid import UUID
 
 import attrs
 import structlog
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
+from airflow.sdk.execution_time.comms import (
+    ErrorResponse,
+    GetAssetByName,
+    GetAssetByUri,
+    GetConnection,
+    GetVariable,
+    GetXCom,
+    MaskSecret,
+)
+from airflow.sdk.execution_time.request_handlers import (
+    handle_get_asset_by_name,
+    handle_get_asset_by_uri,
+    handle_get_connection,
+    handle_get_variable,
+    handle_get_xcom,
+    handle_mask_secret,
+)
 from airflow.sdk.execution_time.supervisor import (
     MIN_HEARTBEAT_INTERVAL,
     SOCKET_CLEANUP_TIMEOUT,
@@ -36,8 +53,11 @@ from airflow.sdk.execution_time.supervisor import (
 )
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
     from structlog.typing import FilteringBoundLogger
     from typing_extensions import Self
+
+    from airflow.sdk.api.client import Client
 
     # Core (airflow.executors.workloads.base.BundleInfo) and SDK (airflow.sdk.api.datamodels._generated.BundleInfo)
     # are structurally identical, but MyPy treats them as different types. This Protocol makes MyPy happy.
@@ -49,6 +69,15 @@ if TYPE_CHECKING:
 __all__ = ["CallbackSubprocess", "supervise_callback"]
 
 log: FilteringBoundLogger = structlog.get_logger(logger_name="callback_supervisor")
+
+
+# The set of messages that a callback subprocess can send to the supervisor.
+# This is a minimal subset of ToSupervisor: read-only access to Connections,
+# Variables, XCom, and Assets, plus MaskSecret for the secrets masker.
+CallbackToSupervisor = Annotated[
+    GetAssetByName | GetAssetByUri | GetConnection | GetVariable | GetXCom | MaskSecret,
+    Field(discriminator="type"),
+]
 
 
 def execute_callback(
@@ -118,14 +147,6 @@ def execute_callback(
         return False, error_msg
 
 
-# An empty message set; the callback subprocess doesn't currently communicate back to the
-# supervisor. This means callback code cannot access runtime services like Connection.get()
-# or Variable.get() which require the supervisor to pass requests to the API server.
-# To enable this, add the needed message types here and implement _handle_request accordingly.
-# See ActivitySubprocess.decoder in supervisor.py for the full task message set and examples.
-_EmptyMessage: TypeAdapter[None] = TypeAdapter(None)
-
-
 @attrs.define(kw_only=True)
 class CallbackSubprocess(WatchedSubprocess):
     """
@@ -133,9 +154,15 @@ class CallbackSubprocess(WatchedSubprocess):
 
     Uses the WatchedSubprocess infrastructure for fork/monitor/signal handling
     while keeping a simple lifecycle: start, run callback, exit.
+
+    Provides a limited set of comms channels (Connections, Variables, XCom,
+    Assets) so that callback code can access runtime services like
+    ``Connection.get()`` and ``Variable.get()`` via the supervisor's API client.
     """
 
-    decoder: ClassVar[TypeAdapter] = _EmptyMessage
+    client: Client  # The HTTP client to use for communication with the API server.
+
+    decoder: ClassVar[TypeAdapter[CallbackToSupervisor]] = TypeAdapter(CallbackToSupervisor)
 
     @classmethod
     def start(  # type: ignore[override]
@@ -145,6 +172,7 @@ class CallbackSubprocess(WatchedSubprocess):
         callback_path: str,
         callback_kwargs: dict,
         bundle_info: _BundleInfoLike | None = None,
+        client: Client,
         logger: FilteringBoundLogger | None = None,
         **kwargs,
     ) -> Self:
@@ -154,7 +182,12 @@ class CallbackSubprocess(WatchedSubprocess):
         # ONLY works because WatchedSubprocess.start() uses os.fork(), so the child
         # inherits the parent's memory space and the variables are available directly.
         def _target():
+
+            from airflow.sdk.execution_time import task_runner
+            from airflow.sdk.execution_time.comms import CommsDecoder, ToTask
+
             _log = structlog.get_logger(logger_name="callback_runner")
+            task_runner.SUPERVISOR_COMMS = CommsDecoder[ToTask, CallbackToSupervisor](log=_log)
 
             # If bundle info is provided, initialize the bundle and ensure its path is importable.
             # This is needed for user-defined callbacks that live inside a DAG bundle rather than
@@ -187,6 +220,7 @@ class CallbackSubprocess(WatchedSubprocess):
 
         return super().start(
             id=UUID(id) if not isinstance(id, UUID) else id,
+            client=client,
             target=_target,
             logger=logger,
             **kwargs,
@@ -236,9 +270,43 @@ class CallbackSubprocess(WatchedSubprocess):
                     )
                     self._cleanup_open_sockets()
 
-    def _handle_request(self, msg, log: FilteringBoundLogger, req_id: int) -> None:
-        """Handle incoming requests from the callback subprocess (currently none expected)."""
-        log.warning("Unexpected request from callback subprocess", msg=msg)
+    def _handle_request(self, msg: CallbackToSupervisor, log: FilteringBoundLogger, req_id: int) -> None:
+        """Handle incoming requests from the callback subprocess."""
+        from airflow.sdk.exceptions import ErrorType
+
+        if isinstance(msg, MaskSecret):
+            log.debug("Received request from callback (body omitted)", msg=type(msg))
+        else:
+            log.debug("Received request from callback", msg=msg)
+
+        resp: BaseModel | None = None
+        dump_opts: dict = {}
+
+        if isinstance(msg, GetConnection):
+            resp, dump_opts = handle_get_connection(self.client, msg)
+        elif isinstance(msg, GetVariable):
+            resp, dump_opts = handle_get_variable(self.client, msg)
+        elif isinstance(msg, GetXCom):
+            resp, dump_opts = handle_get_xcom(self.client, msg)
+        elif isinstance(msg, GetAssetByName):
+            resp, dump_opts = handle_get_asset_by_name(self.client, msg)
+        elif isinstance(msg, GetAssetByUri):
+            resp, dump_opts = handle_get_asset_by_uri(self.client, msg)
+        elif isinstance(msg, MaskSecret):
+            handle_mask_secret(msg)
+        else:
+            log.warning("Unhandled request from callback subprocess", msg=msg)
+            self.send_msg(
+                None,
+                request_id=req_id,
+                error=ErrorResponse(
+                    error=ErrorType.API_SERVER_ERROR,
+                    detail={"status_code": 400, "message": "Unhandled request"},
+                ),
+            )
+            return
+
+        self.send_msg(resp, request_id=req_id, error=None, **dump_opts)
 
 
 def _configure_logging(log_path: str) -> tuple[FilteringBoundLogger, BinaryIO]:
@@ -261,6 +329,9 @@ def supervise_callback(
     callback_kwargs: dict,
     log_path: str | None = None,
     bundle_info: _BundleInfoLike | None = None,
+    token: str = "",
+    server: str | None = None,
+    client: Client | None = None,
 ) -> int:
     """
     Run a single callback execution to completion in a supervised subprocess.
@@ -270,8 +341,13 @@ def supervise_callback(
     :param callback_kwargs: Keyword arguments to pass to the callback.
     :param log_path: Path to write logs, if required.
     :param bundle_info: When provided, the bundle's path is added to sys.path so callbacks in Dag Bundles are importable.
+    :param token: Authentication token for the API client.
+    :param server: Base URL of the API server.
+    :param client: Optional preconfigured client for communication with the server (mostly for tests).
     :return: Exit code of the subprocess (0 = success).
     """
+    from contextlib import suppress
+
     _make_process_nondumpable()
 
     start = time.monotonic()
@@ -285,12 +361,24 @@ def supervise_callback(
         # so logs are clearly separated from task logs.
         logger = structlog.get_logger(logger_name="callback").bind()
 
+    close_client = False
+    if not client:
+        import httpx
+
+        from airflow.sdk.api.client import Client
+
+        limits = httpx.Limits(max_keepalive_connections=1, max_connections=10)
+        client = Client(base_url=server or "", limits=limits, token=token)
+        close_client = True
+        log.debug("Connecting to execution API server", server=server)
+
     try:
         process = CallbackSubprocess.start(
             id=id,
             callback_path=callback_path,
             callback_kwargs=callback_kwargs,
             bundle_info=bundle_info,
+            client=client,
             logger=logger,
             subprocess_logs_to_stdout=True,
         )
@@ -310,3 +398,6 @@ def supervise_callback(
     finally:
         if log_path and log_file_descriptor:
             log_file_descriptor.close()
+        if close_client and client:
+            with suppress(Exception):
+                client.close()

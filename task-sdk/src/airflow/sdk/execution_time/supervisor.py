@@ -50,12 +50,10 @@ from pydantic import BaseModel, TypeAdapter
 from airflow.sdk._shared.logging.structlog import reconfigure_logger
 from airflow.sdk.api.client import Client, ServerResponseError
 from airflow.sdk.api.datamodels._generated import (
-    AssetResponse,
     ConnectionResponse,
     TaskInstance,
     TaskInstanceState,
     TaskStatesResponse,
-    VariableResponse,
     XComSequenceIndexResponse,
 )
 from airflow.sdk.configuration import conf
@@ -63,7 +61,6 @@ from airflow.sdk.exceptions import ErrorType
 from airflow.sdk.execution_time import comms
 from airflow.sdk.execution_time.comms import (
     AssetEventsResult,
-    AssetResult,
     ConnectionResult,
     CreateHITLDetailPayload,
     DagResult,
@@ -115,14 +112,19 @@ from airflow.sdk.execution_time.comms import (
     ToSupervisor,
     TriggerDagRun,
     ValidateInletsAndOutlets,
-    VariableResult,
-    XComResult,
     XComSequenceIndexResult,
     XComSequenceSliceResult,
     _RequestFrame,
     _ResponseFrame,
 )
-from airflow.sdk.log import mask_secret
+from airflow.sdk.execution_time.request_handlers import (
+    handle_get_asset_by_name,
+    handle_get_asset_by_uri,
+    handle_get_connection,
+    handle_get_variable,
+    handle_get_xcom,
+    handle_mask_secret,
+)
 
 try:
     from socket import send_fds
@@ -133,7 +135,7 @@ if TYPE_CHECKING:
     from structlog.typing import FilteringBoundLogger, WrappedLogger
     from typing_extensions import Self
 
-    from airflow.executors.workloads import BundleInfo
+    from airflow.executors.workloads import BundleInfo, ExecutorWorkload
     from airflow.sdk.bases.secrets_backend import BaseSecretsBackend
     from airflow.sdk.definitions.connection import Connection
     from airflow.sdk.types import RuntimeTaskInstanceProtocol as RuntimeTI
@@ -1278,33 +1280,11 @@ class ActivitySubprocess(WatchedSubprocess):
                 rendered_map_index=self._rendered_map_index,
             )
         elif isinstance(msg, GetConnection):
-            conn = self.client.connections.get(msg.conn_id)
-            if isinstance(conn, ConnectionResponse):
-                if conn.password:
-                    mask_secret(conn.password)
-                if conn.extra:
-                    mask_secret(conn.extra)
-                conn_result = ConnectionResult.from_conn_response(conn)
-                resp = conn_result
-                dump_opts = {"exclude_unset": True, "by_alias": True}
-            else:
-                resp = conn
+            resp, dump_opts = handle_get_connection(self.client, msg)
         elif isinstance(msg, GetVariable):
-            var = self.client.variables.get(msg.key)
-            if isinstance(var, VariableResponse):
-                if var.value:
-                    mask_secret(var.value, var.key)
-                var_result = VariableResult.from_variable_response(var)
-                resp = var_result
-                dump_opts = {"exclude_unset": True}
-            else:
-                resp = var
+            resp, dump_opts = handle_get_variable(self.client, msg)
         elif isinstance(msg, GetXCom):
-            xcom = self.client.xcoms.get(
-                msg.dag_id, msg.run_id, msg.task_id, msg.key, msg.map_index, msg.include_prior_dates
-            )
-            xcom_result = XComResult.from_xcom_response(xcom)
-            resp = xcom_result
+            resp, dump_opts = handle_get_xcom(self.client, msg)
         elif isinstance(msg, GetXComCount):
             resp = self.client.xcoms.head(msg.dag_id, msg.run_id, msg.task_id, msg.key)
         elif isinstance(msg, GetXComSequenceItem):
@@ -1356,21 +1336,9 @@ class ActivitySubprocess(WatchedSubprocess):
         elif isinstance(msg, SetRenderedMapIndex):
             self.client.task_instances.set_rendered_map_index(self.id, msg.rendered_map_index)
         elif isinstance(msg, GetAssetByName):
-            asset_resp = self.client.assets.get(name=msg.name)
-            if isinstance(asset_resp, AssetResponse):
-                asset_result = AssetResult.from_asset_response(asset_resp)
-                resp = asset_result
-                dump_opts = {"exclude_unset": True}
-            else:
-                resp = asset_resp
+            resp, dump_opts = handle_get_asset_by_name(self.client, msg)
         elif isinstance(msg, GetAssetByUri):
-            asset_resp = self.client.assets.get(uri=msg.uri)
-            if isinstance(asset_resp, AssetResponse):
-                asset_result = AssetResult.from_asset_response(asset_resp)
-                resp = asset_result
-                dump_opts = {"exclude_unset": True}
-            else:
-                resp = asset_resp
+            resp, dump_opts = handle_get_asset_by_uri(self.client, msg)
         elif isinstance(msg, GetAssetEventByAsset):
             asset_event_resp = self.client.asset_events.get(
                 uri=msg.uri,
@@ -1484,7 +1452,7 @@ class ActivitySubprocess(WatchedSubprocess):
             resp = HITLDetailRequestResult.from_api_response(hitl_detail_request)
             dump_opts = {"exclude_unset": True}
         elif isinstance(msg, MaskSecret):
-            mask_secret(msg.value, msg.name)
+            handle_mask_secret(msg)
         elif isinstance(msg, GetDag):
             dag = self.client.dags.get(
                 dag_id=msg.dag_id,
@@ -2127,6 +2095,86 @@ def supervise_task(
         if close_client and client:
             with suppress(Exception):
                 client.close()
+
+
+def supervise_workload(
+    workload: ExecutorWorkload,
+    *,
+    server: str | None = None,
+    dry_run: bool = False,
+    client: Client | None = None,
+    subprocess_logs_to_stdout: bool = False,
+    proctitle: str | None = None,
+) -> int:
+    """
+    Run any workload type to completion in a supervised subprocess.
+
+    Dispatch to the appropriate supervisor based on workload type. Workload-specific
+    attributes (log_path, sentry_integration, bundle_info, etc.) are read from the
+    workload object itself.
+
+    :param workload: The ``ExecutorWorkload`` to execute.
+    :param server: Base URL of the API server (used by task workloads).
+    :param dry_run: If True, execute without actual task execution (simulate run).
+    :param client: Optional preconfigured client for communication with the server.
+    :param subprocess_logs_to_stdout: Should task logs also be sent to stdout via the main logger.
+    :param proctitle: Process title to set for this workload. If not provided, defaults to
+        ``"airflow supervisor: <workload.display_name>"``. Executors may pass a custom title
+        that includes executor-specific context (e.g. team name).
+    :return: Exit code of the process.
+    """
+    # Imports deferred to avoid an SDK/core dependency at module load time.
+    from airflow.executors.workloads.callback import ExecuteCallback
+    from airflow.executors.workloads.task import ExecuteTask
+
+    try:
+        from setproctitle import setproctitle
+
+        setproctitle(proctitle or f"airflow supervisor: {workload.display_name}")
+    except ImportError:
+        pass
+
+    # Resolve server URL from config when not explicitly provided.
+    # For example, team-specific executors may wish to pass their own server URL.
+    if server is None:
+        base_url = conf.get("api", "base_url", fallback="/")
+        if base_url.startswith("/"):
+            base_url = f"http://localhost:8080{base_url}"
+        server = conf.get(
+            "core",
+            "execution_api_server_url",
+            fallback=f"{base_url.rstrip('/')}/execution/",
+        )
+
+    if isinstance(workload, ExecuteTask):
+        return supervise_task(
+            # workload.ti is a TaskInstanceDTO which duck-types as TaskInstance.
+            # TODO: Create a protocol for this.
+            ti=workload.ti,  # type: ignore[arg-type]
+            bundle_info=workload.bundle_info,
+            dag_rel_path=workload.dag_rel_path,
+            token=workload.token,
+            server=server,
+            dry_run=dry_run,
+            log_path=workload.log_path,
+            subprocess_logs_to_stdout=subprocess_logs_to_stdout,
+            client=client,
+            sentry_integration=getattr(workload, "sentry_integration", ""),
+        )
+    if isinstance(workload, ExecuteCallback):
+        from airflow.sdk.execution_time.callback_supervisor import supervise_callback
+
+        return supervise_callback(
+            id=workload.callback.id,
+            callback_path=workload.callback.data.get("path", ""),
+            callback_kwargs=workload.callback.data.get("kwargs", {}),
+            log_path=workload.log_path,
+            bundle_info=workload.bundle_info,
+            token=workload.token,
+            server=server,
+            client=client,
+        )
+    raise ValueError(f"Unknown workload type: {type(workload).__name__}")
 
 
 def supervise(**kwargs) -> int:
