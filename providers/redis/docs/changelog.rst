@@ -27,6 +27,18 @@
 Changelog
 ---------
 
+4.4.4
+.....
+
+Misc
+~~~~
+
+* ``Load hook metadata from YAML without importing Hook class (#63826)``
+* ``Add provider class registration checks to provider.yaml validation (#64127)``
+
+.. Below changes are excluded from the changelog. Move them to
+   appropriate section above if needed. Do not delete the lines(!):
+
 4.4.3
 .....
 

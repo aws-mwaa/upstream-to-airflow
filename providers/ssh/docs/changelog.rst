@@ -27,6 +27,23 @@
 Changelog
 ---------
 
+4.3.4
+.....
+
+Bug Fixes
+~~~~~~~~~
+
+* ``Fix SSHHookAsync defaulting no_host_key_check to False unlike SSHHook (#64225)``
+
+Misc
+~~~~
+
+* ``Load hook metadata from YAML without importing Hook class (#63826)``
+* ``Replace 'sshtunnel' with native paramiko/asyncssh tunneling (#64299)``
+
+.. Below changes are excluded from the changelog. Move them to
+   appropriate section above if needed. Do not delete the lines(!):
+
 4.3.3
 .....
 
