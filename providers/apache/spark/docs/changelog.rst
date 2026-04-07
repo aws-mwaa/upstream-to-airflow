@@ -35,7 +35,7 @@ Changelog
 Misc
 ~~~~
 
-* ``feat(providers/spark): add post_submit_commands to SparkSubmitHook for sidecar lifecycle management (#64391)``
+* ``Add post_submit_commands to SparkSubmitHook for sidecar lifecycle management (#64391)``
 * ``Load hook metadata from YAML without importing Hook class (#63826)``
 
 .. Below changes are excluded from the changelog. Move them to

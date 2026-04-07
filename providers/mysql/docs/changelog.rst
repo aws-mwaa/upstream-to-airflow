@@ -32,7 +32,7 @@ Changelog
 Bug Fixes
 ~~~~~~~~~
 
-* ``fix: prevent SQL keyword parameterization in MySQL bulk_load_custom (#63530)``
+* ``Prevent SQL keyword parameterization in MySQL bulk_load_custom (#63530)``
 
 Misc
 ~~~~

@@ -33,7 +33,7 @@ Features
 ~~~~~~~~
 
 * ``Add OpenLineage parent and transport info injection to 'EmrServerlessStartJobOperator' (#64807)``
-* `` Add OpenLineage parent info injection to GlueJobOperator     (#64513)``
+* ``Add OpenLineage parent info injection to GlueJobOperator (#64513)``
 
 .. Below changes are excluded from the changelog. Move them to
    appropriate section above if needed. Do not delete the lines(!):

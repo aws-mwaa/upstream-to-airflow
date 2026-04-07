@@ -34,7 +34,7 @@ Features
 
 * ``Add OpenLineage parent and transport info injection to 'EmrServerlessStartJobOperator' (#64807)``
 * ``Add 'EksPodTrigger' (#64187)``
-* ``feat(sagemaker): Add SageMakerConditionOperator and SageMakerFailOperator (#64545)``
+* ``Add SageMakerConditionOperator and SageMakerFailOperator (#64545)``
 
 Bug Fixes
 ~~~~~~~~~
@@ -50,8 +50,8 @@ Misc
 * ``Bump the min aibotocore version to 3.0.0 (#64631)``
 * ``Remove the lxml workaround (#64554)``
 * ``Add debug logging and fix exception handling in DynamoDB hook (#64629)``
-* `` Add OpenLineage parent info injection to GlueJobOperator     (#64513)``
-* ``fix: remove obsolete boto3 extra from aiobotocore dependency (#64330)``
+* ``Add OpenLineage parent info injection to GlueJobOperator (#64513)``
+* ``Remove obsolete boto3 extra from aiobotocore dependency (#64330)``
 * ``Replace AWS keys with placeholder text in documentation and code examples (#63577)``
 
 .. Below changes are excluded from the changelog. Move them to

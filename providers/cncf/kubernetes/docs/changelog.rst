@@ -38,7 +38,7 @@ Features
 Bug Fixes
 ~~~~~~~~~
 
-* ``handle rate limiting of k8s api server in k8s executor (#64504)``
+* ``Handle rate limiting of K8s API server in K8s executor (#64504)``
 
 Misc
 ~~~~
@@ -48,7 +48,7 @@ Misc
 * ``Update cncf's import conf path to use common compat SDK (#64143)``
 * ``Add provider class registration checks to provider.yaml validation (#64127)``
 * ``Add explicit type annotations to k8s code to fix mypy (#64260)``
-* ``fix(mypy): Pass parameters to Kubernetes methods conditionally (#64242)``
+* ``Pass parameters to Kubernetes methods conditionally (#64242)``
 
 .. Below changes are excluded from the changelog. Move them to
    appropriate section above if needed. Do not delete the lines(!):

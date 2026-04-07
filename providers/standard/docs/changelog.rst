@@ -41,8 +41,8 @@ Changelog
 Bug Fixes
 ~~~~~~~~~
 
-* ``fix: ExternalTaskSensor check_existence ignored in deferrable mode (Airflow < 3.0) (#64394)``
-* ``fix(providers/standard): remove premature param value validation in HITLOperator (#64108)``
+* ``ExternalTaskSensor check_existence ignored in deferrable mode (Airflow < 3.0) (#64394)``
+* ``Remove premature param value validation in HITLOperator (#64108)``
 
 Misc
 ~~~~

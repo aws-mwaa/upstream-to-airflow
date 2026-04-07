@@ -26,8 +26,8 @@ Changelog
 Bug Fixes
 ~~~~~~~~~
 
-* ``fix(fab): add authlib as optional oauth extra in fab provider (#64457)``
-* ``fix(providers/fab): prevent AppBuilder re-initialization race in FastAPI login (#64151) (#64418)``
+* ``Add authlib as optional oauth extra in fab provider (#64457)``
+* ``Prevent AppBuilder re-initialization race in FastAPI login (#64151) (#64418)``
 
 Misc
 ~~~~

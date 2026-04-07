@@ -33,7 +33,7 @@ Changelog
 Features
 ~~~~~~~~
 
-* ``feat: add 'write_to_os' writing task logs to opensearch (#64364)``
+* ``Add 'write_to_os' writing task logs to opensearch (#64364)``
 
 Misc
 ~~~~
