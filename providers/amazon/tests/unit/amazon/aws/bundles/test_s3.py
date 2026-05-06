@@ -117,15 +117,7 @@ class TestS3DagBundle:
         bundle = S3DagBundle(
             name="test", aws_conn_id=AWS_CONN_ID_DEFAULT, prefix="project1/dags", bucket_name=S3_BUCKET_NAME
         )
-        assert S3DagBundle.supports_versioning is False
-
-        # set version, it's not supported
-        bundle.version = "test_version"
-
-        with pytest.raises(AirflowException, match="Refreshing a specific version is not supported"):
-            bundle.refresh()
-        with pytest.raises(AirflowException, match="S3 url with version is not supported"):
-            bundle.view_url("test_version")
+        assert S3DagBundle.supports_versioning is True
 
     def test_correct_bundle_path_used(self):
         bundle = S3DagBundle(
@@ -221,3 +213,131 @@ class TestS3DagBundle:
         bundle.refresh()
         assert bundle._log.debug.call_count == 2
         assert bundle._log.debug.call_args_list == [download_log_call, download_log_call]
+
+    def test_get_current_version_with_versioned_bucket(self, s3_client):
+        """Test manifest generation with a versioned S3 bucket."""
+        bucket_name = "versioned-bucket"
+        s3_client.create_bucket(Bucket=bucket_name)
+        # Enable versioning
+        s3_client.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
+        s3_client.put_object(Bucket=bucket_name, Key="dags/dag1.py", Body=b"print('dag1')")
+        s3_client.put_object(Bucket=bucket_name, Key="dags/dag2.py", Body=b"print('dag2')")
+
+        bundle = S3DagBundle(
+            name="test_versioned", aws_conn_id=AWS_CONN_ID_DEFAULT, bucket_name=bucket_name, prefix="dags"
+        )
+        result = bundle.get_current_version()
+
+        assert result is not None
+        assert result.version  # SHA-256 hex string
+        assert len(result.version) == 64  # SHA-256 produces 64 hex chars
+        assert result.data is not None
+        assert result.data["schema_version"] == 1
+        assert "dags/dag1.py" in result.data["files"]
+        assert "dags/dag2.py" in result.data["files"]
+
+    def test_get_current_version_deterministic(self, s3_client):
+        """Same bucket state produces the same hash."""
+        bucket_name = "deterministic-bucket"
+        s3_client.create_bucket(Bucket=bucket_name)
+        s3_client.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
+        s3_client.put_object(Bucket=bucket_name, Key="dag.py", Body=b"content")
+
+        bundle = S3DagBundle(name="test", aws_conn_id=AWS_CONN_ID_DEFAULT, bucket_name=bucket_name, prefix="")
+        v1 = bundle.get_current_version()
+        bundle._cached_bundle_version = None  # Clear cache
+        v2 = bundle.get_current_version()
+
+        assert v1.version == v2.version
+        assert v1.data == v2.data
+
+    def test_get_current_version_unversioned_bucket(self, s3_client):
+        """Unversioned bucket returns None with a warning."""
+        bucket_name = "unversioned-bucket"
+        s3_client.create_bucket(Bucket=bucket_name)
+        # No versioning enabled
+        s3_client.put_object(Bucket=bucket_name, Key="dag.py", Body=b"content")
+
+        bundle = S3DagBundle(name="test", aws_conn_id=AWS_CONN_ID_DEFAULT, bucket_name=bucket_name, prefix="")
+        result = bundle.get_current_version()
+
+        assert result is None
+
+    def test_get_current_version_caches_result(self, s3_client):
+        """get_current_version caches the result within a refresh cycle."""
+        bucket_name = "cached-bucket"
+        s3_client.create_bucket(Bucket=bucket_name)
+        s3_client.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
+        s3_client.put_object(Bucket=bucket_name, Key="dag.py", Body=b"content")
+
+        bundle = S3DagBundle(name="test", aws_conn_id=AWS_CONN_ID_DEFAULT, bucket_name=bucket_name, prefix="")
+        v1 = bundle.get_current_version()
+        v2 = bundle.get_current_version()
+
+        assert v1 is v2  # Same object, not just equal
+
+    def test_refresh_clears_cache(self, s3_bucket):
+        """refresh() clears the cached version so next call rebuilds manifest."""
+        bundle = S3DagBundle(
+            name="test",
+            aws_conn_id=AWS_CONN_ID_DEFAULT,
+            bucket_name=S3_BUCKET_NAME,
+            prefix=S3_BUCKET_PREFIX,
+        )
+        bundle._cached_bundle_version = MagicMock()
+        bundle.refresh()
+        assert bundle._cached_bundle_version is None
+
+    def test_sync_versioned_writes_files(self, s3_client, bundle_temp_dir):
+        """_sync_versioned fetches specific object versions and writes them locally."""
+        bucket_name = "sync-versioned-bucket"
+        s3_client.create_bucket(Bucket=bucket_name)
+        s3_client.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
+        resp1 = s3_client.put_object(Bucket=bucket_name, Key="dags/dag1.py", Body=b"dag1 content")
+        resp2 = s3_client.put_object(Bucket=bucket_name, Key="dags/dag2.py", Body=b"dag2 content")
+
+        manifest = {
+            "schema_version": 1,
+            "files": {
+                "dags/dag1.py": resp1["VersionId"],
+                "dags/dag2.py": resp2["VersionId"],
+            },
+        }
+
+        bundle = S3DagBundle(
+            name="test_sync",
+            aws_conn_id=AWS_CONN_ID_DEFAULT,
+            bucket_name=bucket_name,
+            prefix="dags",
+            version="testhash",
+            version_data=manifest,
+        )
+        bundle._sync_versioned(manifest)
+
+        assert (bundle.s3_dags_dir / "dag1.py").read_bytes() == b"dag1 content"
+        assert (bundle.s3_dags_dir / "dag2.py").read_bytes() == b"dag2 content"
+
+    def test_sync_versioned_unsupported_schema_version(self, s3_bucket):
+        """_sync_versioned raises for unrecognized schema_version."""
+        bundle = S3DagBundle(
+            name="test",
+            aws_conn_id=AWS_CONN_ID_DEFAULT,
+            bucket_name=S3_BUCKET_NAME,
+            prefix=S3_BUCKET_PREFIX,
+        )
+        manifest = {"schema_version": 99, "files": {}}
+
+        with pytest.raises(AirflowException, match="schema version 99 is not supported"):
+            bundle._sync_versioned(manifest)
+
+    def test_versioned_bundle_uses_versions_dir(self, s3_client, bundle_temp_dir):
+        """When version is set, s3_dags_dir uses versions_dir/<version>."""
+        bundle = S3DagBundle(
+            name="test",
+            aws_conn_id=AWS_CONN_ID_DEFAULT,
+            bucket_name="bucket",
+            prefix="",
+            version="abc123",
+        )
+        assert "versions" in str(bundle.s3_dags_dir)
+        assert "abc123" in str(bundle.s3_dags_dir)
