@@ -1,0 +1,122 @@
+ .. Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+ ..   http://www.apache.org/licenses/LICENSE-2.0
+
+ .. Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+
+.. _s3_dag_bundle:
+
+S3 Dag Bundle
+=============
+
+The S3 Dag Bundle allows Airflow to load Dags directly from an Amazon S3 bucket.
+When S3 bucket versioning is enabled, the bundle provides reproducible dag runs
+by pinning each run to a specific snapshot of the bucket's contents.
+
+Setup
+-----
+
+Configure the S3 Dag Bundle in your ``airflow.cfg``:
+
+.. code-block:: ini
+
+    [dag_processor]
+    dag_bundle_config_list = [
+        {
+          "name": "my_s3_dags",
+          "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+          "kwargs": {
+            "bucket_name": "my-dags-bucket",
+            "prefix": "dags/",
+            "aws_conn_id": "aws_default"
+          }
+        }
+      ]
+
+Versioning
+----------
+
+To enable versioning, enable S3 bucket versioning on your bucket:
+
+.. code-block:: bash
+
+    aws s3api put-bucket-versioning \
+        --bucket my-dags-bucket \
+        --versioning-configuration Status=Enabled
+
+Once enabled, the S3 bundle automatically:
+
+1. Calls ``ListObjectVersions`` on each refresh cycle to build a manifest mapping
+   each object key to its current S3 version ID.
+2. Computes a SHA-256 hash of the manifest as the version identifier.
+3. Persists the manifest alongside the version hash so tasks can fetch exact file versions.
+4. At task execution time, fetches files using specific ``VersionId`` parameters from the manifest.
+
+If the bucket state hasn't changed between refresh cycles, the hash is identical and no
+new version is created (natural deduplication).
+
+**No Airflow configuration is needed** — versioning is always-on when S3 bucket versioning
+is enabled. If bucket versioning is not enabled, the bundle logs a warning and falls back
+to unversioned behavior (always fetching the latest objects).
+
+Permissions
+-----------
+
+The S3 bundle requires only read permissions:
+
+- ``s3:GetObject``
+- ``s3:ListBucket``
+- ``s3:GetBucketVersioning``
+- ``s3:ListBucketVersions`` (for versioning support)
+
+No write permissions are needed. No additional AWS resources (DynamoDB, second bucket, etc.)
+are required.
+
+Known Limitations
+-----------------
+
+S3 Lifecycle Policies
+~~~~~~~~~~~~~~~~~~~~~
+
+If your bucket has a lifecycle policy that deletes non-current object versions (e.g., after
+30 days), historical re-runs will fail for versions older than the retention period. The error
+message will indicate which object version is missing:
+
+.. code-block:: text
+
+    S3 object version 'abc123' for key 'dags/my_dag.py' no longer exists.
+    The bucket's lifecycle policy may have deleted it.
+
+**Recommendation:** Align your S3 lifecycle retention with your dag run retention needs.
+
+Snapshot Consistency
+~~~~~~~~~~~~~~~~~~~~
+
+If files are uploaded to S3 while the manifest snapshot is being generated (during the
+``ListObjectVersions`` pagination), the manifest may include or exclude files that were
+added or removed mid-listing. This is a narrow race window (the duration of a single
+pagination sequence) and is unlikely to cause issues in practice.
+
+Troubleshooting
+---------------
+
+**"S3 bucket versioning is not enabled on bucket 'X'"**
+    Enable bucket versioning: ``aws s3api put-bucket-versioning --bucket X --versioning-configuration Status=Enabled``
+
+**"Manifest schema version N is not supported"**
+    Upgrade the Amazon provider to a version that supports the manifest format.
+
+**"S3 object version 'X' for key 'Y' no longer exists"**
+    The object version was deleted by a lifecycle policy. Re-run with a more recent version,
+    or adjust your lifecycle policy retention period.

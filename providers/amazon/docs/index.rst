@@ -43,6 +43,7 @@
     Configuration <configurations-ref>
     Executors <executors/index>
     Message Queues <message-queues/index>
+    Dag Bundles <dag-bundles/s3>
     AWS Auth manager <auth-manager/index>
     CLI <cli-ref>
 
