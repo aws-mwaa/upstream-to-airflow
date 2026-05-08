@@ -17,14 +17,18 @@
 
 from __future__ import annotations
 
+import textwrap
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from sqlalchemy.orm import contains_eager, noload
+from sqlalchemy.orm import contains_eager, joinedload, noload
 
 from airflow.api_fastapi.auth.managers.models.resource_details import DagAccessEntity
 from airflow.api_fastapi.common.db.common import SessionDep, paginated_select
+from airflow.api_fastapi.common.headers import HeaderAcceptJsonOrNdjson
 from airflow.api_fastapi.common.parameters import (
     FilterParam,
     QueryLimit,
@@ -35,12 +39,15 @@ from airflow.api_fastapi.common.parameters import (
     filter_param_factory,
 )
 from airflow.api_fastapi.common.router import AirflowRouter
+from airflow.api_fastapi.common.types import Mimetype
+from airflow.api_fastapi.core_api.datamodels.log import TaskInstancesLogResponse
 from airflow.api_fastapi.core_api.datamodels.ui.deadline import (
     DeadlineAlertCollectionResponse,
     DeadlineCollectionResponse,
 )
 from airflow.api_fastapi.core_api.openapi.exceptions import create_openapi_http_exception_doc
 from airflow.api_fastapi.core_api.security import ReadableDagRunsFilterDep, requires_access_dag
+from airflow.models.callback import Callback
 from airflow.models.dagrun import DagRun
 from airflow.models.deadline import Deadline
 from airflow.models.deadline_alert import DeadlineAlert
@@ -106,7 +113,7 @@ def get_deadlines(
         .options(
             contains_eager(Deadline.dagrun).options(noload(DagRun.deadlines)),
             contains_eager(Deadline.deadline_alert),
-            noload(Deadline.callback),
+            joinedload(Deadline.callback),
         )
     )
 
@@ -201,3 +208,82 @@ def get_dag_deadline_alerts(
     alerts = session.scalars(alerts_select)
 
     return DeadlineAlertCollectionResponse(deadline_alerts=alerts, total_entries=total_entries)
+
+
+ndjson_example_response_for_callback_log = {
+    Mimetype.NDJSON: {
+        "schema": {
+            "type": "string",
+            "example": textwrap.dedent(
+                """\
+    {"content": "content"}
+    {"content": "content"}
+    """
+            ),
+        }
+    }
+}
+
+
+@deadlines_router.get(
+    "/dagRuns/{dag_run_id}/callbacks/{callback_id}/logs",
+    responses=create_openapi_http_exception_doc(
+        [
+            status.HTTP_404_NOT_FOUND,
+        ]
+    ),
+    dependencies=[
+        Depends(
+            requires_access_dag(
+                method="GET",
+                access_entity=DagAccessEntity.TASK_LOGS,
+            )
+        ),
+    ],
+    response_model=TaskInstancesLogResponse,
+    response_model_exclude_unset=True,
+)
+def get_callback_logs(
+    dag_id: str,
+    dag_run_id: str,
+    callback_id: UUID,
+    accept: HeaderAcceptJsonOrNdjson,
+    session: SessionDep,
+) -> TaskInstancesLogResponse | StreamingResponse:
+    """
+    Get execution logs for a callback associated with a deadline.
+
+    Returns the logs produced during callback execution. These logs are uploaded
+    to remote storage (or written locally) by the callback supervisor after execution.
+    """
+    from airflow.utils.log.callback_log_reader import read_callback_log
+
+    # Verify the callback exists
+    callback = session.scalar(select(Callback).where(Callback.id == callback_id))
+    if callback is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"Callback with id `{callback_id}` was not found",
+        )
+
+    # Verify the dag_run exists with matching dag_id
+    dag_run = session.scalar(select(DagRun).where(DagRun.dag_id == dag_id, DagRun.run_id == dag_run_id))
+    if dag_run is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"DagRun with dag_id: `{dag_id}` and run_id: `{dag_run_id}` was not found",
+        )
+
+    log_stream = read_callback_log(
+        dag_id=dag_id,
+        run_id=dag_run_id,
+        callback_id=str(callback_id),
+    )
+
+    if accept == Mimetype.NDJSON:
+        ndjson_stream = (f"{log.model_dump_json()}\n" for log in log_stream)
+        return StreamingResponse(media_type="application/x-ndjson", content=ndjson_stream)
+
+    # JSON response: collect all log messages
+    content = list(log_stream)
+    return TaskInstancesLogResponse(content=content, continuation_token=None)
