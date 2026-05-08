@@ -282,7 +282,7 @@ class TestCallbackExecutionTimeout:
                 proc._exit_code = -signal.SIGTERM
             return None
 
-        mocker.patch.object(proc, "_service_subprocess", side_effect=mock_service_subprocess)
+        mocker.patch.object(CallbackSubprocess, "_service_subprocess", side_effect=mock_service_subprocess)
 
         with patch(
             "airflow.sdk.execution_time.callback_supervisor.time.monotonic", side_effect=mock_monotonic
@@ -321,7 +321,7 @@ class TestCallbackExecutionTimeout:
                 proc._exit_code = 0
             return None
 
-        mocker.patch.object(proc, "_service_subprocess", side_effect=mock_service_subprocess)
+        mocker.patch.object(CallbackSubprocess, "_service_subprocess", side_effect=mock_service_subprocess)
 
         with patch(
             "airflow.sdk.execution_time.callback_supervisor.time.monotonic", side_effect=mock_monotonic
