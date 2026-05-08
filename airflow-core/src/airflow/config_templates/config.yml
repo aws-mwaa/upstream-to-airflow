@@ -3026,6 +3026,20 @@ state_store:
       example: "mypackage.state.CustomStateBackend"
       default: "airflow.state.metastore.MetastoreStateBackend"
 
+deadlines:
+  description: |
+    Configuration for deadline alerts feature.
+  options:
+    callback_execution_timeout:
+      description: |
+        Maximum time in seconds that a deadline callback is allowed to execute before being
+        terminated. If a callback does not complete within this timeout, the supervisor will
+        kill the subprocess. Set to 0 to disable the timeout (callbacks may run indefinitely).
+      version_added: 3.3.0
+      type: integer
+      example: ~
+      default: "300"
+
 profiling:
   description: |
     Configuration for memory profiling in Airflow component.

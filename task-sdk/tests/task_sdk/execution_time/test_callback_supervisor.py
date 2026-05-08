@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import signal
 import socket
 from dataclasses import dataclass
 from operator import attrgetter
@@ -228,3 +229,104 @@ class TestCallbackHandleRequest:
 
         if client_mock:
             mock_client_method.assert_called_once_with(*client_mock.args, **client_mock.kwargs)
+
+
+class TestCallbackExecutionTimeout:
+    """Verify that CallbackSubprocess kills the subprocess when the execution timeout is exceeded."""
+
+    @pytest.fixture
+    def callback_subprocess(self, mocker):
+        read_end, write_end = socket.socketpair()
+        proc = CallbackSubprocess(
+            process_log=mocker.MagicMock(),
+            id="12345678-1234-5678-1234-567812345678",
+            pid=12345,
+            stdin=write_end,
+            client=mocker.Mock(),
+            process=mocker.Mock(),
+        )
+        return proc, read_end
+
+    def test_timeout_kills_subprocess(self, monkeypatch, mocker, callback_subprocess, captured_logs):
+        """When the callback exceeds the configured timeout, the subprocess is terminated."""
+        timeout_seconds = 10
+        monkeypatch.setattr(
+            "airflow.sdk.execution_time.callback_supervisor.CALLBACK_EXECUTION_TIMEOUT", timeout_seconds
+        )
+
+        proc, _read_end = callback_subprocess
+
+        # Patch the kill method so we can assert it was called
+        mock_kill = mocker.patch("airflow.sdk.execution_time.callback_supervisor.CallbackSubprocess.kill")
+
+        # Simulate time progressing past the timeout.
+        # First call returns 0 (start), subsequent calls return past-timeout values.
+        call_count = 0
+
+        def mock_monotonic():
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                return 0.0
+            # After the first call, time has exceeded the timeout
+            return timeout_seconds + 1.0
+
+        # Patch _service_subprocess to simulate one loop iteration where the process is still alive
+        service_call_count = 0
+
+        def mock_service_subprocess(max_wait_time):
+            nonlocal service_call_count
+            service_call_count += 1
+            # After the kill is called (which sets _exit_code via the mock), stop the loop
+            if service_call_count > 1:
+                proc._exit_code = -signal.SIGTERM
+            return None
+
+        mocker.patch.object(proc, "_service_subprocess", side_effect=mock_service_subprocess)
+
+        with patch(
+            "airflow.sdk.execution_time.callback_supervisor.time.monotonic", side_effect=mock_monotonic
+        ):
+            proc._monitor_subprocess()
+
+        mock_kill.assert_called_once_with(signal.SIGTERM, force=True)
+        assert any(
+            "Callback execution timeout reached" in record.get("event", "") for record in captured_logs
+        )
+
+    def test_no_timeout_when_disabled(self, monkeypatch, mocker, callback_subprocess):
+        """When timeout is 0, the subprocess is never killed for exceeding a time limit."""
+        monkeypatch.setattr("airflow.sdk.execution_time.callback_supervisor.CALLBACK_EXECUTION_TIMEOUT", 0)
+
+        proc, _read_end = callback_subprocess
+
+        mock_kill = mocker.patch("airflow.sdk.execution_time.callback_supervisor.CallbackSubprocess.kill")
+
+        # Simulate time progressing well past any reasonable timeout
+        call_count = 0
+
+        def mock_monotonic():
+            nonlocal call_count
+            call_count += 1
+            # Return ever-increasing time (simulating long-running callback)
+            return call_count * 1000.0
+
+        # Subprocess exits normally after one iteration
+        service_call_count = 0
+
+        def mock_service_subprocess(max_wait_time):
+            nonlocal service_call_count
+            service_call_count += 1
+            if service_call_count >= 2:
+                proc._exit_code = 0
+            return None
+
+        mocker.patch.object(proc, "_service_subprocess", side_effect=mock_service_subprocess)
+
+        with patch(
+            "airflow.sdk.execution_time.callback_supervisor.time.monotonic", side_effect=mock_monotonic
+        ):
+            proc._monitor_subprocess()
+
+        # kill should never be called when timeout is disabled
+        mock_kill.assert_not_called()

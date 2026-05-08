@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import signal
 import sys
 import time
 from importlib import import_module
@@ -29,6 +30,7 @@ import structlog
 from pydantic import Field, TypeAdapter
 
 from airflow.sdk._shared.module_loading import accepts_context, accepts_keyword_args
+from airflow.sdk.configuration import conf
 from airflow.sdk.exceptions import ErrorType
 from airflow.sdk.execution_time.comms import (
     ErrorResponse,
@@ -66,6 +68,10 @@ if TYPE_CHECKING:
 __all__ = ["CallbackSubprocess", "supervise_callback"]
 
 log: FilteringBoundLogger = structlog.get_logger(logger_name="callback_supervisor")
+
+# Maximum time (in seconds) a deadline callback is allowed to run before being killed.
+# A value of 0 disables the timeout.
+CALLBACK_EXECUTION_TIMEOUT: int = conf.getint("deadlines", "callback_execution_timeout", fallback=300)
 
 
 # The set of messages that a callback subprocess can send to the supervisor.
@@ -246,13 +252,29 @@ class CallbackSubprocess(WatchedSubprocess):
 
     def _monitor_subprocess(self):
         """
-        Monitor the subprocess until it exits.
+        Monitor the subprocess until it exits or exceeds the callback execution timeout.
 
-        A simplified version of ActivitySubprocess._monitor_subprocess() without heartbeating
-        or timeout handling, just process output monitoring and stuck-socket cleanup.
+        Enforces the ``[deadlines] callback_execution_timeout`` configuration: if the
+        subprocess runs longer than the configured limit, it is killed with SIGTERM
+        (escalating to SIGKILL if necessary).
         """
+        start_monotonic = time.monotonic()
+
         while self._exit_code is None or self._open_sockets:
             self._service_subprocess(max_wait_time=MIN_HEARTBEAT_INTERVAL)
+
+            # Enforce callback execution timeout (0 means disabled).
+            if (
+                CALLBACK_EXECUTION_TIMEOUT > 0
+                and self._exit_code is None
+                and (time.monotonic() - start_monotonic) > CALLBACK_EXECUTION_TIMEOUT
+            ):
+                log.warning(
+                    "Callback execution timeout reached; terminating subprocess",
+                    pid=self.pid,
+                    timeout_seconds=CALLBACK_EXECUTION_TIMEOUT,
+                )
+                self.kill(signal.SIGTERM, force=True)
 
             # If the process has exited but sockets remain open, apply a timeout
             # to prevent hanging indefinitely on stuck sockets.
