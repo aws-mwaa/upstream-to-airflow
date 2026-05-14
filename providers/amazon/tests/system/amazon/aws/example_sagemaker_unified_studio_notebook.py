@@ -54,6 +54,7 @@ DOMAIN_ID_KEY = "DOMAIN_ID"
 PROJECT_ID_KEY = "PROJECT_ID"
 NOTEBOOK_ID_KEY = "NOTEBOOK_ID"
 NOTEBOOK_B_ID_KEY = "NOTEBOOK_B_ID"
+DATAZONE_ROLE_ARN_KEY = "DATAZONE_ROLE_ARN"
 
 sys_test_context_task = (
     SystemTestContextBuilder()
@@ -61,8 +62,11 @@ sys_test_context_task = (
     .add_variable(PROJECT_ID_KEY)
     .add_variable(NOTEBOOK_ID_KEY)
     .add_variable(NOTEBOOK_B_ID_KEY)
+    .add_variable(DATAZONE_ROLE_ARN_KEY)
     .build()
 )
+
+DATAZONE_CONN_ID = "aws_datazone_notebook"
 
 with DAG(
     DAG_ID,
@@ -77,6 +81,7 @@ with DAG(
     project_id = test_context[PROJECT_ID_KEY]
     notebook_id = test_context[NOTEBOOK_ID_KEY]
     notebook_b_id = test_context[NOTEBOOK_B_ID_KEY]
+    datazone_role_arn = test_context[DATAZONE_ROLE_ARN_KEY]
 
     # [START howto_operator_sagemaker_unified_studio_notebook]
     import time

@@ -83,11 +83,34 @@ with DAG(
     )
     # [END howto_operator_s3tables_create_table_bucket]
 
+    @task
+    def build_table_bucket_policy():
+        """Build a valid table bucket policy using the caller's account ID."""
+        import json
+
+        import boto3
+
+        account_id = boto3.client("sts").get_caller_identity()["Account"]
+        return json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "TestPolicy",
+                        "Effect": "Allow",
+                        "Principal": {"AWS": f"arn:aws:iam::{account_id}:root"},
+                        "Action": "s3tables:GetTable",
+                        "Resource": "*",
+                    }
+                ],
+            }
+        )
+
     # [START howto_operator_s3tables_put_table_bucket_policy]
     put_policy = S3TablesPutTableBucketPolicyOperator(
         task_id="put_table_bucket_policy",
         table_bucket_arn=create_table_bucket.output,
-        resource_policy='{"Version":"2012-10-17","Statement":[]}',
+        resource_policy=build_table_bucket_policy(),
     )
     # [END howto_operator_s3tables_put_table_bucket_policy]
 
