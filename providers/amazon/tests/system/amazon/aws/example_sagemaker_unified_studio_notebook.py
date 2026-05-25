@@ -27,6 +27,7 @@ from airflow.providers.amazon.aws.sensors.sagemaker_unified_studio_notebook impo
     SageMakerUnifiedStudioNotebookSensor,
 )
 
+from tests_common.test_utils.api_client_helpers import create_airflow_connection
 from tests_common.test_utils.version_compat import AIRFLOW_V_3_0_PLUS
 
 if AIRFLOW_V_3_0_PLUS:
@@ -75,17 +76,13 @@ DATAZONE_CONN_ID = "aws_datazone_notebook"
 @task
 def setup_datazone_connection(role_arn: str):
     """Configure an Airflow connection that assumes the DataZone environment role."""
-    from airflow import settings
-    from airflow.models.connection import Connection
-
-    conn = Connection(
-        conn_id=DATAZONE_CONN_ID,
-        conn_type="aws",
-        extra=json.dumps({"role_arn": role_arn, "assume_role_method": "assume_role"}),
+    create_airflow_connection(
+        connection_id=DATAZONE_CONN_ID,
+        connection_conf={
+            "conn_type": "aws",
+            "extra": json.dumps({"role_arn": role_arn, "assume_role_method": "assume_role"}),
+        },
     )
-    session = settings.Session()  # type: ignore[misc]
-    session.add(conn)
-    session.commit()
 
 
 with DAG(
