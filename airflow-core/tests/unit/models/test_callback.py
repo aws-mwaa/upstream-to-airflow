@@ -109,12 +109,37 @@ class TestCallback:
         metric_info = callback.get_metric_info(CallbackState.SUCCESS, "0")
 
         assert metric_info["stat"] == "deadline_alerts.callback_success"
+        # kwargs is JSON-stringified so non-primitive tag values don't crash OTel
+        # (see test_get_metric_info_dict_values_are_stringified for the regression).
         assert metric_info["tags"] == {
             "result": "0",
             "path": TEST_ASYNC_CALLBACK.path,
-            "kwargs": {"email": "test@example.com"},
+            "kwargs": '{"email": "test@example.com"}',
             "dag_id": TEST_DAG_ID,
         }
+
+    def test_get_metric_info_dict_values_are_stringified(self):
+        """
+        Regression for ``TypeError: unhashable type: 'dict'`` raised by OpenTelemetry's
+        ``_view_instrument_match`` when callback metric tags contain dict/list values.
+
+        OTel builds its aggregation key as ``frozenset(attributes.items())``; any tag
+        value that isn't hashable (dict, list, set) crashes the triggerer when a
+        callback completes — e.g., deadline async callbacks whose ``result`` is a dict.
+        """
+        callback = TriggererCallback(TEST_ASYNC_CALLBACK, prefix="deadline_alerts", dag_id=TEST_DAG_ID)
+        callback.data["kwargs"] = {"context": {"dag_id": TEST_DAG_ID}, "nested": {"a": 1}}
+
+        # ``result`` is a dict — exactly the case that surfaced in the deadline DAG.
+        metric_info = callback.get_metric_info(CallbackState.SUCCESS, {"output": [1, 2], "code": 0})
+
+        # Every tag value must be a primitive (str/int/float/bool/None) so OTel can hash it.
+        for k, v in metric_info["tags"].items():
+            assert isinstance(v, (str, int, float, bool)) or v is None, (
+                f"Tag {k!r}={v!r} is type {type(v).__name__}; must be primitive for OTel."
+            )
+        # ``frozenset(attributes.items())`` must not raise.
+        frozenset(metric_info["tags"].items())
 
 
 class TestTriggererCallback:
