@@ -3279,9 +3279,9 @@ profiling:
       example: ~
       default: "False"
 
-deadlines:
+callbacks:
   description: |
-    Configuration for deadline callbacks.
+    Configuration for callbacks (deadline alerts, etc.).
   options:
     callback_execution_timeout:
       description: |
