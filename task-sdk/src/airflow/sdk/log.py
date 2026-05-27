@@ -142,7 +142,16 @@ def configure_logging(
     # dictConfig has now run — safe to build the watchtower handler.
     # We append remote processors into the already-configured structlog chain,
     # inserting before the final renderer (last processor in the chain).
-    if (remote := load_remote_log_handler()) and (remote_processors := getattr(remote, "processors")):
+    #
+    # Skip when sending_to_supervisor=True: the task subprocess must NOT
+    # instantiate its own remote log handler (e.g. watchtower CloudWatchLogHandler).
+    # Doing so creates a handler whose daemon thread is killed without flushing
+    # when the subprocess calls os._exit(), and the handler's DescribeLogGroups
+    # call appears to "stall" because CreateLogStream/PutLogEvents never follow.
+    # The supervisor process is responsible for forwarding logs to remote storage.
+    if not sending_to_supervisor and (
+        (remote := load_remote_log_handler()) and (remote_processors := getattr(remote, "processors"))
+    ):
         current_processors = list(structlog.get_config()["processors"])
         # Insert before the final renderer
         updated_processors = current_processors[:-1] + list(remote_processors) + [current_processors[-1]]

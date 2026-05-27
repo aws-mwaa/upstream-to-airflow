@@ -110,14 +110,25 @@ class CloudWatchRemoteLogIO(LoggingMixin):  # noqa: D101
     _handler: watchtower.CloudWatchLogHandler | None = attrs.field(default=None, init=False, repr=False)
 
     def _create_handler(self) -> watchtower.CloudWatchLogHandler:
+        import logging as _logging
+
         _json_serialize = conf.getimport("aws", "cloudwatch_task_handler_json_serializer", fallback=None)
-        return watchtower.CloudWatchLogHandler(
+        handler = watchtower.CloudWatchLogHandler(
             log_group_name=self.log_group,
             log_stream_name=self.log_stream_name,
             use_queues=True,
             boto3_client=self.hook.get_conn(),
             json_serialize_default=_json_serialize or json_serialize_legacy,
         )
+        # Remove from logging._handlerList so that dictConfig() /
+        # _clearExistingHandlers() cannot kill this handler behind our back.
+        # We manage the handler lifecycle explicitly via close()/flush().
+        _logging._acquireLock()
+        try:
+            _logging._handlerList[:] = [ref for ref in _logging._handlerList if ref() is not handler]
+        finally:
+            _logging._releaseLock()
+        return handler
 
     _handler_creating: bool = attrs.field(default=False, init=False, repr=False)
 
@@ -184,10 +195,14 @@ class CloudWatchRemoteLogIO(LoggingMixin):  # noqa: D101
         # Closing the handler sets `shutting_down` to True, which prevents any further logs from being sent.
         # When `shutting_down` is True, means the logging system is in the process of shutting down,
         # during which it attempts to flush the logs which are queued.
-        if self.handler is None or self.handler.shutting_down:
+        #
+        # Access _handler directly (not the self-healing property) to avoid
+        # recreating a dead handler during cleanup. If the handler was never
+        # created or is already shutting down, there is nothing to flush.
+        if self._handler is None or self._handler.shutting_down:
             return
 
-        self.handler.flush()
+        self._handler.flush()
 
     def upload(self, path: os.PathLike | str, ti: RuntimeTI):
         """Upload the given log path to the remote storage."""
