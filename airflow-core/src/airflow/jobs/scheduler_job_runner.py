@@ -696,6 +696,9 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     len(unique_dag_ids),
                     list(unique_dag_ids),
                 )
+                for ti in task_instances_to_examine:
+                    if team := dag_id_to_team_name.get(ti.dag_id):
+                        ti._team_name = team
 
             executor_slots_available: dict[ExecutorName, int] = {}
             # First get a mapping of executor names to slots they have available
@@ -1582,6 +1585,12 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     .group_by(DagRun)
                 )
             )
+            if self._multi_team and paused_runs:
+                paused_dag_ids = {dr.dag_id for dr in paused_runs}
+                paused_team_mapping = self._get_team_names_for_dag_ids(paused_dag_ids, session)
+                for dr in paused_runs:
+                    if team := paused_team_mapping.get(dr.dag_id):
+                        dr._team_name = team
             for dag_run in paused_runs:
                 dag = self.scheduler_dag_bag.get_dag_for_run(dag_run=dag_run, session=session)
                 if dag is not None:
@@ -1811,6 +1820,13 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
             # Bulk fetch the currently active dag runs for the dags we are
             # examining, rather than making one query per DagRun
             dag_runs = DagRun.get_running_dag_runs_to_examine(session=session)
+
+            if self._multi_team and dag_runs:
+                unique_dag_ids = {dr.dag_id for dr in dag_runs}
+                dr_team_mapping = self._get_team_names_for_dag_ids(unique_dag_ids, session)
+                for dr in dag_runs:
+                    if team := dr_team_mapping.get(dr.dag_id):
+                        dr._team_name = team
 
             callback_tuples = self._schedule_all_dag_runs(guard, dag_runs, session)
 
@@ -2989,6 +3005,9 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
         if self._multi_team:
             unique_dag_ids = {ti.dag_id for ti in task_instances_without_heartbeats}
             dag_id_to_team_name = self._get_team_names_for_dag_ids(unique_dag_ids, session)
+            for ti in task_instances_without_heartbeats:
+                if team := dag_id_to_team_name.get(ti.dag_id):
+                    ti._team_name = team
         else:
             dag_id_to_team_name = {}
 
