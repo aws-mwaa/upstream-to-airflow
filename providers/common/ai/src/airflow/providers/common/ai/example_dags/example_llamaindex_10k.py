@@ -418,8 +418,13 @@ def example_llamaindex_10k_analysis():
     # [END 10k_decompose]
 
     @task
-    def extract_sub_questions(decomposed: DecomposedQuestion) -> list[SubQuestion]:
-        return decomposed.sub_questions
+    def extract_sub_questions(decomposed: DecomposedQuestion) -> list[dict]:
+        # The operator pushes a model on Airflow 3.3+ and a dict on older cores
+        # (model_dump back-compat); model_validate accepts either, so attribute
+        # access works on both. Emit dicts -- a bare nested model can't be
+        # deserialized from XCom on a core without the registration walk.
+        decomposed = DecomposedQuestion.model_validate(decomposed)
+        return [sub_question.model_dump() for sub_question in decomposed.sub_questions]
 
     sub_questions = extract_sub_questions(decomposed)
 
@@ -428,11 +433,11 @@ def example_llamaindex_10k_analysis():
     # Each sub-question targets a specific company's pre-built index.
     # ------------------------------------------------------------------
     @task
-    def build_retrieval_kwargs(sub_questions: list[SubQuestion]) -> list[dict]:
+    def build_retrieval_kwargs(sub_questions: list[dict]) -> list[dict]:
         return [
             {
-                "query": sq.sub_question,
-                "index_persist_dir": f"{INDEX_BASE_DIR}/{sq.ticker.lower()}",
+                "query": sq["sub_question"],
+                "index_persist_dir": f"{INDEX_BASE_DIR}/{sq['ticker'].lower()}",
             }
             for sq in sub_questions
         ]
@@ -459,14 +464,14 @@ def example_llamaindex_10k_analysis():
     # re-associates each result with its company.
     # ------------------------------------------------------------------
     @task
-    def collect_results(sub_questions: list[SubQuestion], results: list[dict]) -> str:
+    def collect_results(sub_questions: list[dict], results: list[dict]) -> str:
         sections = []
         for sq, r in zip(sub_questions, results):
             chunks_text = "\n".join(
                 f"  [{i + 1}] (score {c.get('score') or 0.0:.2f}) {c['text']}"
                 for i, c in enumerate(r["chunks"])
             )
-            sections.append(f"## {sq.ticker} -- {sq.sub_question}\n{chunks_text}")
+            sections.append(f"## {sq['ticker']} -- {sq['sub_question']}\n{chunks_text}")
         return "\n\n".join(sections)
 
     collected = collect_results(sub_questions, retrieval_results.output)
@@ -498,11 +503,13 @@ Cite specific data points and scores.
 
     # ------------------------------------------------------------------
     # Step 7: Format the structured report into readable text for the
-    # human reviewer.  The LLM produced an AnalysisReport instance (via
-    # output_type=AnalysisReport); this task renders it as clean prose.
+    # human reviewer.  The LLM produced a structured report (a model on
+    # Airflow 3.3+, a dict on older cores); normalise it and render as prose.
     # ------------------------------------------------------------------
     @task
     def format_report(report: AnalysisReport) -> str:
+        # model_validate accepts the model (Airflow 3.3+) or a dict (older cores).
+        report = AnalysisReport.model_validate(report)
         lines = [f"# Executive Summary\n\n{report.executive_summary}"]
 
         if report.company_findings:

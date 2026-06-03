@@ -462,7 +462,12 @@ def example_langchain_10k_analysis():
 
     @task
     def extract_sub_questions(decomposed: DecomposedQuestion) -> list[dict]:
-        return [sq.model_dump() for sq in decomposed.sub_questions]
+        # The operator pushes a model on Airflow 3.3+ and a dict on older cores
+        # (model_dump back-compat); model_validate accepts either, so attribute
+        # access works on both. Emit dicts -- a bare nested model can't be
+        # deserialized from XCom on a core without the registration walk.
+        decomposed = DecomposedQuestion.model_validate(decomposed)
+        return [sub_question.model_dump() for sub_question in decomposed.sub_questions]
 
     sub_questions = extract_sub_questions(decomposed)
 
@@ -561,32 +566,32 @@ Cite specific data points and scores.
 
     # ------------------------------------------------------------------
     # Step 7: Format the structured report into readable text for the
-    # human reviewer.  The LLM produced a dict (via output_type=
-    # AnalysisReport); this task renders it as clean prose.
+    # human reviewer.  The LLM produced a structured report (a model on
+    # Airflow 3.3+, a dict on older cores); normalise it and render as prose.
     # ------------------------------------------------------------------
     @task
     def format_report(report: AnalysisReport) -> str:
-        if hasattr(report, "model_dump"):
-            report = report.model_dump()
-        lines = [f"# Executive Summary\n\n{report['executive_summary']}"]
+        # model_validate accepts the model (Airflow 3.3+) or a dict (older cores).
+        report = AnalysisReport.model_validate(report)
+        lines = [f"# Executive Summary\n\n{report.executive_summary}"]
 
-        if report.get("company_findings"):
+        if report.company_findings:
             lines.append("\n# Company Findings")
-            for finding in report["company_findings"]:
+            for finding in report.company_findings:
                 company = finding.get("company") or finding.get("ticker", "Unknown")
                 lines.append(f"\n## {company}")
                 for key, value in finding.items():
                     if key not in ("company", "ticker"):
                         lines.append(f"- **{key}**: {value}")
 
-        if report.get("key_risks"):
+        if report.key_risks:
             lines.append("\n# Key Risks")
-            for risk in report["key_risks"]:
+            for risk in report.key_risks:
                 lines.append(f"- {risk}")
 
-        if report.get("recommendations"):
+        if report.recommendations:
             lines.append("\n# Recommendations")
-            for rec in report["recommendations"]:
+            for rec in report.recommendations:
                 lines.append(f"- {rec}")
 
         return "\n".join(lines)
