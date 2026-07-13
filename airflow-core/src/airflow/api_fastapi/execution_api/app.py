@@ -143,10 +143,12 @@ class JWTReissueMiddleware(BaseHTTPMiddleware):
                     validator: JWTValidator = await services.aget(JWTValidator)
                     claims = await validator.avalidated_claims(token, {})
 
-                    # Workload tokens are long-lived and meant to survive queue
-                    # wait times so avoid refreshing them. If avalidated_claims
-                    # raises for a workload token, the outer except handles it.
-                    if claims.get("scope") == "workload":
+                    # Workload and callback tokens are long-lived and meant to
+                    # survive queue wait times, and callback tokens are exchanged
+                    # exactly once at the /callbacks/{id}/run endpoint, so avoid
+                    # refreshing them here. If avalidated_claims raises for such a
+                    # token, the outer except handles it.
+                    if claims.get("scope") in ("workload", "callback"):
                         return response
 
                     now = int(time.time())

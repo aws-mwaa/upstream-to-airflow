@@ -21,7 +21,7 @@ import logging
 from typing import Annotated
 
 from cadwyn import VersionedAPIRouter
-from fastapi import HTTPException, Query, Security, status
+from fastapi import HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import NoResultFound
 
@@ -33,7 +33,7 @@ from airflow.api_fastapi.compat import HTTP_422_UNPROCESSABLE_CONTENT
 from airflow.api_fastapi.execution_api.datamodels.dagrun import DagRunStateResponse, TriggerDAGRunPayload
 from airflow.api_fastapi.execution_api.datamodels.taskinstance import DagRun
 from airflow.api_fastapi.execution_api.datamodels.token import TIToken
-from airflow.api_fastapi.execution_api.security import CurrentTIToken, ExecutionAPIRoute, require_auth
+from airflow.api_fastapi.execution_api.security import CurrentTIToken, ExecutionAPIRoute
 from airflow.exceptions import DagNotPartitionedError, DagRunAlreadyExists
 from airflow.models.dag import DagModel
 from airflow.models.dagrun import DagRun as DagRunModel
@@ -66,7 +66,6 @@ def get_previous_dagrun_compat(
 
 @router.get(
     "/{dag_id}/{run_id}",
-    dependencies=[Security(require_auth, scopes=["token:execution", "token:workload"])],
     responses={status.HTTP_404_NOT_FOUND: {"description": "Dag run not found"}},
 )
 def get_dag_run(dag_id: str, run_id: str, session: SessionDep) -> DagRun:

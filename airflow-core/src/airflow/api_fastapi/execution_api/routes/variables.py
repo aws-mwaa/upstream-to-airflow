@@ -73,7 +73,7 @@ log = logging.getLogger(__name__)
 # it requires a variable_key path parameter that /keys does not have.
 @router.get(
     "/keys",
-    dependencies=[Security(require_auth, scopes=["token:execution", "token:workload"])],
+    dependencies=[Security(require_auth, scopes=["token:execution"])],
     responses={
         status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
     },
@@ -110,7 +110,7 @@ def get_variable_keys(
 @router.get(
     "/{variable_key:path}",
     dependencies=[
-        Security(require_auth, scopes=["token:execution", "token:workload"]),
+        Security(require_auth, scopes=["token:execution"]),
         Depends(has_variable_access),
     ],
     responses={

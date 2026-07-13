@@ -569,6 +569,14 @@ def supervise_callback(
         else:
             logger = structlog.get_logger(logger_name="callback").bind()
 
+        # Exchange the single-use callback token for a short-lived execution token
+        # before doing anything else. This marks the callback RUNNING and swaps the
+        # client's ``callback``-scoped token (which can reach ONLY this endpoint) for
+        # an ``execution`` token used by the subprocess's context reads. The exchange
+        # is idempotent-safe: a duplicate delivery finds the callback already RUNNING
+        # and raises, so the callback runs at most once.
+        client.callbacks.run(UUID(id))
+
         try:
             process = CallbackSubprocess.start(
                 id=id,

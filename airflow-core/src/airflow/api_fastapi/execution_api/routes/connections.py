@@ -64,7 +64,7 @@ log = logging.getLogger(__name__)
 @router.get(
     "/{connection_id}",
     dependencies=[
-        Security(require_auth, scopes=["token:execution", "token:workload"]),
+        Security(require_auth, scopes=["token:execution"]),
         Depends(has_connection_access),
     ],
     responses={
