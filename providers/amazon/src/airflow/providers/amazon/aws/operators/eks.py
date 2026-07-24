@@ -28,6 +28,7 @@ from collections.abc import Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 
+import tenacity
 from botocore.exceptions import ClientError, WaiterError
 
 from airflow.exceptions import AirflowProviderDeprecationWarning
@@ -42,7 +43,11 @@ from airflow.providers.amazon.aws.triggers.eks import (
     EksDeleteNodegroupTrigger,
     EksPodTrigger,
 )
-from airflow.providers.amazon.aws.utils import validate_execute_complete_event
+from airflow.providers.amazon.aws.utils import (
+    EKS_DELETE_RETRY_TIMEOUT,
+    build_eks_delete_retry_args,
+    validate_execute_complete_event,
+)
 from airflow.providers.amazon.aws.utils.mixins import aws_template_fields
 from airflow.providers.amazon.aws.utils.waiter_with_logging import wait
 from airflow.providers.cncf.kubernetes.utils.pod_manager import OnFinishAction
@@ -57,7 +62,10 @@ except ImportError:
     )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from airflow.sdk import Context
+    from airflow.sdk.types import Logger
 
 
 CHECK_INTERVAL_SECONDS = 15
@@ -75,6 +83,19 @@ SUCCESS_MSG = "No {compute} remain, deleting cluster."
 SUPPORTED_COMPUTE_VALUES = frozenset({"nodegroup", "fargate"})
 NODEGROUP_FULL_NAME = "Amazon EKS managed node groups"
 FARGATE_FULL_NAME = "AWS Fargate profiles"
+
+
+def _get_delete_defer_timeout(waiter_delay: int, waiter_max_attempts: int) -> timedelta:
+    return timedelta(
+        seconds=EKS_DELETE_RETRY_TIMEOUT + waiter_delay * waiter_max_attempts,
+        minutes=1,
+    )
+
+
+def _delete_with_retry(
+    delete_method: Callable[..., Any], logger: Logger | logging.Logger, **delete_kwargs: Any
+) -> Any:
+    return tenacity.Retrying(**build_eks_delete_retry_args(logger))(delete_method, **delete_kwargs)
 
 
 def _create_compute(
@@ -139,7 +160,9 @@ def _create_compute(
             # delete_nodegroup_on_failure defaults to True to prevent orphaned nodegroups.
             if delete_nodegroup_on_failure:
                 try:
-                    eks_hook.delete_nodegroup(
+                    _delete_with_retry(
+                        eks_hook.delete_nodegroup,
+                        log,
                         clusterName=cluster_name,
                         nodegroupName=nodegroup_name,
                     )
@@ -398,7 +421,6 @@ class EksCreateClusterOperator(AwsBaseOperator[EksHook]):
             raise AirflowException("Trigger error: event is None")
         if event["status"] == "failed":
             self.log.error("Cluster failed to start and will be torn down.")
-            self.hook.delete_cluster(name=self.cluster_name)
             self.defer(
                 trigger=EksDeleteClusterTrigger(
                     cluster_name=self.cluster_name,
@@ -409,7 +431,7 @@ class EksCreateClusterOperator(AwsBaseOperator[EksHook]):
                     force_delete_compute=False,
                 ),
                 method_name="execute_failed",
-                timeout=timedelta(seconds=self.waiter_max_attempts * self.waiter_delay),
+                timeout=_get_delete_defer_timeout(self.waiter_delay, self.waiter_max_attempts),
             )
         elif event["status"] == "success":
             self.log.info("Cluster is ready to provision compute.")
@@ -793,6 +815,13 @@ class EksDeleteClusterOperator(AwsBaseOperator[EksHook]):
 
     def execute(self, context: Context):
         if self.deferrable:
+            # The trigger discovers how many compute resources require bounded delete and wait phases,
+            # so users can set execution_timeout when they need one overall deadline.
+            timeout = (
+                None
+                if self.force_delete_compute
+                else _get_delete_defer_timeout(self.waiter_delay, self.waiter_max_attempts)
+            )
             self.defer(
                 trigger=EksDeleteClusterTrigger(
                     cluster_name=self.cluster_name,
@@ -803,13 +832,13 @@ class EksDeleteClusterOperator(AwsBaseOperator[EksHook]):
                     force_delete_compute=self.force_delete_compute,
                 ),
                 method_name="execute_complete",
-                timeout=timedelta(seconds=self.waiter_delay * self.waiter_max_attempts),
+                timeout=timeout,
             )
         elif self.force_delete_compute:
             self.delete_any_nodegroups()
             self.delete_any_fargate_profiles()
 
-        self.hook.delete_cluster(name=self.cluster_name)
+        _delete_with_retry(self.hook.delete_cluster, self.log, name=self.cluster_name)
 
         if self.wait_for_completion:
             self.log.info("Waiting for cluster to delete.  This will take some time.")
@@ -826,7 +855,12 @@ class EksDeleteClusterOperator(AwsBaseOperator[EksHook]):
         if nodegroups:
             self.log.info(CAN_NOT_DELETE_MSG.format(compute=NODEGROUP_FULL_NAME, count=len(nodegroups)))
             for group in nodegroups:
-                self.hook.delete_nodegroup(clusterName=self.cluster_name, nodegroupName=group)
+                _delete_with_retry(
+                    self.hook.delete_nodegroup,
+                    self.log,
+                    clusterName=self.cluster_name,
+                    nodegroupName=group,
+                )
             # Note this is a custom waiter so we're using hook.get_waiter(), not hook.conn.get_waiter().
             self.log.info("Waiting for all nodegroups to delete.  This will take some time.")
             self.hook.get_waiter("all_nodegroups_deleted").wait(clusterName=self.cluster_name)
@@ -847,7 +881,12 @@ class EksDeleteClusterOperator(AwsBaseOperator[EksHook]):
                 # The API will return a (cluster) ResourceInUseException if you try
                 # to delete Fargate profiles in parallel the way we can with nodegroups,
                 # so each must be deleted sequentially
-                self.hook.delete_fargate_profile(clusterName=self.cluster_name, fargateProfileName=profile)
+                _delete_with_retry(
+                    self.hook.delete_fargate_profile,
+                    self.log,
+                    clusterName=self.cluster_name,
+                    fargateProfileName=profile,
+                )
                 self.hook.conn.get_waiter("fargate_profile_deleted").wait(
                     clusterName=self.cluster_name, fargateProfileName=profile
                 )
@@ -921,7 +960,6 @@ class EksDeleteNodegroupOperator(AwsBaseOperator[EksHook]):
         super().__init__(**kwargs)
 
     def execute(self, context: Context):
-        self.hook.delete_nodegroup(clusterName=self.cluster_name, nodegroupName=self.nodegroup_name)
         if self.deferrable:
             self.defer(
                 trigger=EksDeleteNodegroupTrigger(
@@ -931,13 +969,19 @@ class EksDeleteNodegroupOperator(AwsBaseOperator[EksHook]):
                     region_name=self.region_name,
                     waiter_delay=self.waiter_delay,
                     waiter_max_attempts=self.waiter_max_attempts,
+                    initiate_delete=True,
                 ),
                 method_name="execute_complete",
-                # timeout is set to ensure that if a trigger dies, the timeout does not restart
-                # 60 seconds is added to allow the trigger to exit gracefully (i.e. yield TriggerEvent)
-                timeout=timedelta(seconds=self.waiter_max_attempts * self.waiter_delay + 60),
+                timeout=_get_delete_defer_timeout(self.waiter_delay, self.waiter_max_attempts),
             )
-        elif self.wait_for_completion:
+
+        _delete_with_retry(
+            self.hook.delete_nodegroup,
+            self.log,
+            clusterName=self.cluster_name,
+            nodegroupName=self.nodegroup_name,
+        )
+        if self.wait_for_completion:
             self.log.info("Waiting for nodegroup to delete.  This will take some time.")
             self.hook.conn.get_waiter("nodegroup_deleted").wait(
                 clusterName=self.cluster_name, nodegroupName=self.nodegroup_name
@@ -1009,9 +1053,6 @@ class EksDeleteFargateProfileOperator(AwsBaseOperator[EksHook]):
         super().__init__(**kwargs)
 
     def execute(self, context: Context):
-        self.hook.delete_fargate_profile(
-            clusterName=self.cluster_name, fargateProfileName=self.fargate_profile_name
-        )
         if self.deferrable:
             self.defer(
                 trigger=EksDeleteFargateProfileTrigger(
@@ -1021,13 +1062,19 @@ class EksDeleteFargateProfileOperator(AwsBaseOperator[EksHook]):
                     waiter_delay=self.waiter_delay,
                     waiter_max_attempts=self.waiter_max_attempts,
                     region_name=self.region_name,
+                    initiate_delete=True,
                 ),
                 method_name="execute_complete",
-                # timeout is set to ensure that if a trigger dies, the timeout does not restart
-                # 60 seconds is added to allow the trigger to exit gracefully (i.e. yield TriggerEvent)
-                timeout=timedelta(seconds=(self.waiter_max_attempts * self.waiter_delay + 60)),
+                timeout=_get_delete_defer_timeout(self.waiter_delay, self.waiter_max_attempts),
             )
-        elif self.wait_for_completion:
+
+        _delete_with_retry(
+            self.hook.delete_fargate_profile,
+            self.log,
+            clusterName=self.cluster_name,
+            fargateProfileName=self.fargate_profile_name,
+        )
+        if self.wait_for_completion:
             self.log.info("Waiting for Fargate profile to delete.  This will take some time.")
             self.hook.conn.get_waiter("fargate_profile_deleted").wait(
                 clusterName=self.cluster_name,

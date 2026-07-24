@@ -157,6 +157,7 @@ class TestTriggersSerialization:
                 aws_conn_id=AWS_CONN_ID,
                 waiter_delay=WAITER_DELAY,
                 waiter_max_attempts=MAX_ATTEMPTS,
+                initiate_delete=True,
             ),
             EksCreateNodegroupTrigger(
                 cluster_name=TEST_CLUSTER_IDENTIFIER,
@@ -173,6 +174,7 @@ class TestTriggersSerialization:
                 waiter_delay=WAITER_DELAY,
                 waiter_max_attempts=MAX_ATTEMPTS,
                 region_name=AWS_REGION,
+                initiate_delete=True,
             ),
             EksCreateClusterTrigger(
                 cluster_name=TEST_CLUSTER_IDENTIFIER,

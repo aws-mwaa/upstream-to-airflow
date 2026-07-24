@@ -19,19 +19,35 @@ from __future__ import annotations
 import datetime
 from typing import TYPE_CHECKING, Any
 
+import tenacity
 from botocore.exceptions import ClientError
 
 from airflow.providers.amazon.aws.hooks.eks import EksHook
 from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger
+from airflow.providers.amazon.aws.utils import build_eks_delete_retry_args
 from airflow.providers.amazon.aws.utils.waiter_with_logging import async_wait
 from airflow.providers.cncf.kubernetes.triggers.pod import KubernetesPodTrigger
 from airflow.providers.common.compat.sdk import AirflowException
 from airflow.triggers.base import TriggerEvent
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from pendulum import DateTime
 
     from airflow.providers.amazon.aws.hooks.base_aws import AwsGenericHook
+    from airflow.sdk.types import Logger
+
+
+async def _delete_with_retry(
+    delete_method: Callable[..., Awaitable[Any]], logger: Logger, **delete_kwargs: Any
+) -> None:
+    """Issue an idempotent EKS delete, retrying while the resource is in use."""
+    try:
+        await tenacity.AsyncRetrying(**build_eks_delete_retry_args(logger))(delete_method, **delete_kwargs)
+    except ClientError as ex:
+        if ex.response.get("Error", {}).get("Code") != "ResourceNotFoundException":
+            raise
 
 
 class EksCreateClusterTrigger(AwsBaseWaiterTrigger):
@@ -275,13 +291,7 @@ class EksDeleteClusterTrigger(AwsBaseWaiterTrigger):
             if self.force_delete_compute:
                 await self.delete_any_nodegroups(client=client)
                 await self.delete_any_fargate_profiles(client=client)
-            try:
-                await client.delete_cluster(name=self.cluster_name)
-            except ClientError as ex:
-                if ex.response.get("Error").get("Code") == "ResourceNotFoundException":
-                    pass
-                else:
-                    raise
+            await _delete_with_retry(client.delete_cluster, self.log, name=self.cluster_name)
             await async_wait(
                 waiter=waiter,
                 waiter_delay=int(self.waiter_delay),
@@ -306,7 +316,12 @@ class EksDeleteClusterTrigger(AwsBaseWaiterTrigger):
             self.log.info("Deleting nodegroups")
             waiter = self.hook().get_waiter("all_nodegroups_deleted", deferrable=True, client=client)
             for group in nodegroups["nodegroups"]:
-                await client.delete_nodegroup(clusterName=self.cluster_name, nodegroupName=group)
+                await _delete_with_retry(
+                    client.delete_nodegroup,
+                    self.log,
+                    clusterName=self.cluster_name,
+                    nodegroupName=group,
+                )
             await async_wait(
                 waiter=waiter,
                 waiter_delay=int(self.waiter_delay),
@@ -331,7 +346,12 @@ class EksDeleteClusterTrigger(AwsBaseWaiterTrigger):
         if fargate_profiles.get("fargateProfileNames"):
             self.log.info("Waiting for Fargate profiles to delete.  This will take some time.")
             for profile in fargate_profiles["fargateProfileNames"]:
-                await client.delete_fargate_profile(clusterName=self.cluster_name, fargateProfileName=profile)
+                await _delete_with_retry(
+                    client.delete_fargate_profile,
+                    self.log,
+                    clusterName=self.cluster_name,
+                    fargateProfileName=profile,
+                )
                 await async_wait(
                     waiter=client.get_waiter("fargate_profile_deleted"),
                     waiter_delay=int(self.waiter_delay),
@@ -393,6 +413,7 @@ class EksDeleteFargateProfileTrigger(AwsBaseWaiterTrigger):
     :param waiter_delay: The amount of time in seconds to wait between attempts.
     :param waiter_max_attempts: The maximum number of attempts to be made.
     :param aws_conn_id: The Airflow connection used for AWS credentials.
+    :param initiate_delete: Whether the trigger should initiate deletion before waiting.
     """
 
     def __init__(
@@ -403,9 +424,17 @@ class EksDeleteFargateProfileTrigger(AwsBaseWaiterTrigger):
         waiter_max_attempts: int,
         aws_conn_id: str | None,
         region_name: str | None = None,
+        initiate_delete: bool = False,
     ):
+        self.cluster_name = cluster_name
+        self.fargate_profile_name = fargate_profile_name
+        self.initiate_delete = initiate_delete
         super().__init__(
-            serialized_fields={"cluster_name": cluster_name, "fargate_profile_name": fargate_profile_name},
+            serialized_fields={
+                "cluster_name": cluster_name,
+                "fargate_profile_name": fargate_profile_name,
+                "initiate_delete": initiate_delete,
+            },
             waiter_name="fargate_profile_deleted",
             waiter_args={"clusterName": cluster_name, "fargateProfileName": fargate_profile_name},
             failure_message="Failure while deleting Fargate profile",
@@ -420,6 +449,18 @@ class EksDeleteFargateProfileTrigger(AwsBaseWaiterTrigger):
 
     def hook(self) -> AwsGenericHook:
         return EksHook(aws_conn_id=self.aws_conn_id, region_name=self.region_name)
+
+    async def run(self):
+        if self.initiate_delete:
+            async with await self.hook().get_async_conn() as client:
+                await _delete_with_retry(
+                    client.delete_fargate_profile,
+                    self.log,
+                    clusterName=self.cluster_name,
+                    fargateProfileName=self.fargate_profile_name,
+                )
+        async for event in super().run():
+            yield event
 
 
 class EksCreateNodegroupTrigger(AwsBaseWaiterTrigger):
@@ -483,6 +524,7 @@ class EksDeleteNodegroupTrigger(AwsBaseWaiterTrigger):
     :param aws_conn_id: The Airflow connection used for AWS credentials.
     :param region_name: Which AWS region the connection should use. (templated)
         If this is None or empty then the default boto3 behaviour is used.
+    :param initiate_delete: Whether the trigger should initiate deletion before waiting.
     """
 
     def __init__(
@@ -493,9 +535,17 @@ class EksDeleteNodegroupTrigger(AwsBaseWaiterTrigger):
         waiter_max_attempts: int,
         aws_conn_id: str | None,
         region_name: str | None = None,
+        initiate_delete: bool = False,
     ):
+        self.cluster_name = cluster_name
+        self.nodegroup_name = nodegroup_name
+        self.initiate_delete = initiate_delete
         super().__init__(
-            serialized_fields={"cluster_name": cluster_name, "nodegroup_name": nodegroup_name},
+            serialized_fields={
+                "cluster_name": cluster_name,
+                "nodegroup_name": nodegroup_name,
+                "initiate_delete": initiate_delete,
+            },
             waiter_name="nodegroup_deleted",
             waiter_args={"clusterName": cluster_name, "nodegroupName": nodegroup_name},
             failure_message="Error deleting nodegroup",
@@ -510,3 +560,15 @@ class EksDeleteNodegroupTrigger(AwsBaseWaiterTrigger):
 
     def hook(self) -> AwsGenericHook:
         return EksHook(aws_conn_id=self.aws_conn_id, region_name=self.region_name)
+
+    async def run(self):
+        if self.initiate_delete:
+            async with await self.hook().get_async_conn() as client:
+                await _delete_with_retry(
+                    client.delete_nodegroup,
+                    self.log,
+                    clusterName=self.cluster_name,
+                    nodegroupName=self.nodegroup_name,
+                )
+        async for event in super().run():
+            yield event

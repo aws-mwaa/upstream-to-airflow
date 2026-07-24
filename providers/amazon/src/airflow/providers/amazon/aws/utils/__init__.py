@@ -22,13 +22,39 @@ import re
 from datetime import datetime, timezone
 from enum import Enum
 from importlib import metadata
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import tenacity
+from botocore.exceptions import ClientError
 
 from airflow.providers.common.compat.sdk import AirflowException
 from airflow.utils.helpers import prune_dict
 from airflow.version import version
 
+if TYPE_CHECKING:
+    from airflow.sdk.types import Logger
+
 log = logging.getLogger(__name__)
+
+EKS_DELETE_RETRY_TIMEOUT = 300
+
+
+def _is_eks_resource_in_use_error(exception: BaseException) -> bool:
+    return (
+        isinstance(exception, ClientError)
+        and exception.response.get("Error", {}).get("Code") == "ResourceInUseException"
+    )
+
+
+def build_eks_delete_retry_args(logger: Logger | logging.Logger) -> dict[str, Any]:
+    """Build retry arguments for transient EKS delete conflicts."""
+    return {
+        "retry": tenacity.retry_if_exception(_is_eks_resource_in_use_error),
+        "wait": tenacity.wait_exponential(max=60),
+        "stop": tenacity.stop_after_delay(EKS_DELETE_RETRY_TIMEOUT),
+        "before_sleep": tenacity.before_sleep_log(logger, logging.WARNING),
+        "reraise": True,
+    }
 
 
 def trim_none_values(obj: dict):
