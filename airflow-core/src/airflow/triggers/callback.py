@@ -23,6 +23,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from airflow._shared.module_loading import accepts_context, import_string, qualname
+from airflow._shared.template_rendering import render_callback_kwargs
 from airflow.models.callback import CallbackState
 from airflow.triggers.base import BaseTrigger, TriggerEvent
 
@@ -51,6 +52,9 @@ class CallbackTrigger(BaseTrigger):
         self.callback_kwargs = callback_kwargs or {}
         # Read by Trigger.from_object() when persisting the row; unused once running.
         self.queue = queue
+        # Set by the TriggerRunner from workload dag_run_data before run() is called — the
+        # same pattern as task_instance is set for task-bound triggers. Not serialized.
+        self._callback_context: dict | None = None
 
     def serialize(self) -> tuple[str, dict[str, Any]]:
         return (
@@ -62,13 +66,23 @@ class CallbackTrigger(BaseTrigger):
         try:
             yield TriggerEvent({PAYLOAD_STATUS_KEY: CallbackState.RUNNING})
             callback = import_string(self.callback_path)
-            # TODO: get full context and run template rendering. Right now, a simple context is included in `callback_kwargs`
-            context = self.callback_kwargs.pop("context", None)
+
+            kwargs = dict(self.callback_kwargs)
+            # Pop unconditionally: 3.2.x serialized the context inside kwargs, and it must
+            # never be double-passed alongside the explicit ``context=`` below. Prefer the
+            # runtime context set by the TriggerRunner over the stored one.
+            stored_context = kwargs.pop("context", None)
+            context = self._callback_context or stored_context
+
+            # Render Jinja in string kwargs using the same shared helper as the executor
+            # callback path, so async and sync deadline callbacks render identically.
+            if context is not None:
+                kwargs = render_callback_kwargs(kwargs, context)
 
             if accepts_context(callback) and context is not None:
-                result = await callback(**self.callback_kwargs, context=context)
+                result = await callback(**kwargs, context=context)
             else:
-                result = await callback(**self.callback_kwargs)
+                result = await callback(**kwargs)
 
             yield TriggerEvent({PAYLOAD_STATUS_KEY: CallbackState.SUCCESS, PAYLOAD_BODY_KEY: result})
 
