@@ -97,6 +97,7 @@ from airflow.sdk.execution_time.context import (
     _get_connection,
     _process_connection_result_conn,
     _wrap_external_ref,
+    build_context_from_dag_run,
     context_to_airflow_vars,
     set_current_context,
 )
@@ -2538,3 +2539,58 @@ class TestAssetStateStoreAccessorWithCustomBackend:
         result = await AssetStateStoreAccessor(name=self.ASSET_NAME).aget("watermark")
 
         assert result == "2026-05-01"
+
+
+class TestBuildContextFromDagRun:
+    def _dag_run(self, **overrides):
+        from airflow.sdk.api.datamodels._generated import DagRun, DagRunState, DagRunType
+
+        fields: dict = {
+            "dag_id": "ctx_dag",
+            "run_id": "ctx_run",
+            "logical_date": timezone.datetime(2024, 6, 15, 12, 30),
+            "data_interval_start": timezone.datetime(2024, 6, 15),
+            "data_interval_end": timezone.datetime(2024, 6, 16),
+            "run_after": timezone.datetime(2024, 6, 16),
+            "start_date": timezone.datetime(2024, 6, 15, 12, 30),
+            "end_date": None,
+            "run_type": DagRunType.SCHEDULED,
+            "state": DagRunState.RUNNING,
+            "consumed_asset_events": [],
+            "partition_key": None,
+            **overrides,
+        }
+        return DagRun(**fields)
+
+    def test_builds_dag_run_level_context(self):
+        dag_run = self._dag_run()
+
+        context = build_context_from_dag_run(dag_run)
+
+        assert context["dag_run"] is dag_run
+        assert context["run_id"] == "ctx_run"
+        assert context["logical_date"] == timezone.datetime(2024, 6, 15, 12, 30)
+        assert context["ds"] == "2024-06-15"
+        assert context["ds_nodash"] == "20240615"
+        assert context["ts"] == "2024-06-15T12:30:00+00:00"
+        assert context["ts_nodash"] == "20240615T123000"
+        assert context["ts_nodash_with_tz"] == "20240615T123000+0000"
+        assert context["data_interval_start"] == timezone.datetime(2024, 6, 15)
+        assert context["data_interval_end"] == timezone.datetime(2024, 6, 16)
+        assert "deadline" not in context
+
+    def test_no_logical_date_omits_derived_fields(self):
+        dag_run = self._dag_run(logical_date=None, data_interval_start=None, data_interval_end=None)
+
+        context = build_context_from_dag_run(dag_run)
+
+        assert context["run_id"] == "ctx_run"
+        assert "logical_date" not in context
+        assert "ds" not in context
+
+    def test_exposes_deadline_metadata(self):
+        deadline = {"id": "abc", "deadline_time": "2024-06-15T13:00:00+00:00"}
+
+        context = build_context_from_dag_run(self._dag_run(), deadline=deadline)
+
+        assert context["deadline"] == deadline

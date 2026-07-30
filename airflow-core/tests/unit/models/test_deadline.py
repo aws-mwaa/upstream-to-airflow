@@ -27,7 +27,6 @@ import time_machine
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from airflow.api_fastapi.core_api.datamodels.dag_run import DAGRunResponse
 from airflow.models import DagRun
 from airflow.models.deadline import Deadline, _fetch_from_db
 from airflow.providers.standard.operators.empty import EmptyOperator
@@ -265,16 +264,17 @@ class TestDeadline:
 
         assert deadline_orm.missed
 
-        callback_kwargs = deadline_orm.callback.data["kwargs"]
-        context = callback_kwargs.pop("context")
-        assert callback_kwargs == TEST_CALLBACK_KWARGS
-
-        assert context["deadline"]["id"] == str(deadline_orm.id)
-        assert context["deadline"]["deadline_time"].timestamp() == deadline_orm.deadline_time.timestamp()
-        assert context["dag_run"] == DAGRunResponse.model_validate(dagrun).model_dump(mode="json")
+        # User kwargs are untouched; the execution context is built at runtime from
+        # the routing identifiers instead of being serialized by the scheduler.
+        data = deadline_orm.callback.data
+        assert data["kwargs"] == TEST_CALLBACK_KWARGS
+        assert data["dag_id"] == dagrun.dag_id
+        assert data["run_id"] == dagrun.run_id
+        assert data["deadline_id"] == str(deadline_orm.id)
+        assert data["deadline_time"] == deadline_orm.deadline_time.isoformat()
 
     @pytest.mark.db_test
-    def test_handle_miss_persists_triggerer_callback_context(self, dagrun, session):
+    def test_handle_miss_persists_triggerer_callback_routing_data(self, dagrun, session):
         deadline_orm = Deadline(
             deadline_time=DEFAULT_DATE,
             callback=AsyncCallback(TEST_CALLBACK_PATH, TEST_CALLBACK_KWARGS),
@@ -288,7 +288,6 @@ class TestDeadline:
         callback_id = deadline_orm.callback.id
         deadline_id = deadline_orm.id
         deadline_time = deadline_orm.deadline_time
-        expected_dag_run = DAGRunResponse.model_validate(dagrun).model_dump(mode="json")
 
         deadline_orm.handle_miss(session)
         session.commit()
@@ -297,14 +296,11 @@ class TestDeadline:
         callback = session.scalar(select(Deadline).where(Deadline.id == deadline_id)).callback
         assert callback.id == callback_id
 
-        callback_kwargs = callback.data["kwargs"]
-        context = callback_kwargs["context"]
-        assert {
-            key: value for key, value in callback_kwargs.items() if key != "context"
-        } == TEST_CALLBACK_KWARGS
-        assert context["deadline"]["id"] == str(deadline_id)
-        assert context["deadline"]["deadline_time"].timestamp() == deadline_time.timestamp()
-        assert context["dag_run"] == expected_dag_run
+        assert callback.data["kwargs"] == TEST_CALLBACK_KWARGS
+        assert callback.data["dag_id"] == dagrun.dag_id
+        assert callback.data["run_id"] == dagrun.run_id
+        assert callback.data["deadline_id"] == str(deadline_id)
+        assert callback.data["deadline_time"] == deadline_time.isoformat()
 
         callback.trigger = None
         session.commit()
@@ -325,6 +321,7 @@ class TestDeadline:
         deadline_id = deadline_orm.id
         dagrun_id = dagrun.id
         dag_id = dagrun.dag_id
+        run_id = dagrun.run_id
 
         deadline_orm.handle_miss(session)
         session.commit()
@@ -332,8 +329,10 @@ class TestDeadline:
 
         callback = session.scalar(select(Deadline).where(Deadline.id == deadline_id)).callback
         assert callback.id == callback_id
+        assert callback.data["kwargs"] == TEST_CALLBACK_KWARGS
         assert callback.data["dag_run_id"] == str(dagrun_id)
         assert callback.data["dag_id"] == dag_id
+        assert callback.data["run_id"] == run_id
         assert callback.data["deadline_id"] == str(deadline_id)
 
 
