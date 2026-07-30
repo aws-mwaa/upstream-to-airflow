@@ -232,41 +232,26 @@ class Deadline(Base):
         """Handle a missed deadline by queueing the callback."""
         from airflow.models.dag import DagModel  # Avoids circular import
 
-        def get_simple_context():
-            from airflow.api_fastapi.core_api.datamodels.dag_run import DAGRunResponse
-            from airflow.models import DagRun
-
-            # TODO: Use the TaskAPI from within Triggerer to fetch full context instead of sending this context
-            #  from the scheduler
-
-            # Fetch the DagRun from the database again to avoid errors when self.dagrun's relationship fields
-            # are not in the current session.
-            dagrun = session.get(DagRun, self.dagrun_id)
-
-            return {
-                "dag_run": DAGRunResponse.model_validate(dagrun).model_dump(mode="json"),
-                "deadline": {"id": str(self.id), "deadline_time": self.deadline_time},
-            }
-
-        def callback_data_with_context():
-            data = self.callback.data.copy()
-            kwargs = dict(data.get("kwargs") or {})
-            kwargs["context"] = get_simple_context()
-            data["kwargs"] = kwargs
-            return data
+        # Routing identifiers stored at the top level of callback.data (not in user kwargs).
+        # The triggerer and the callback supervisor use them to locate the DagRun and build
+        # the execution context at runtime, instead of the scheduler serializing a context
+        # into the callback kwargs here.
+        data = self.callback.data.copy()
+        data["dag_id"] = self.dagrun.dag_id
+        data["run_id"] = self.dagrun.run_id
+        data["deadline_id"] = str(self.id)
+        data["deadline_time"] = self.deadline_time.isoformat()
 
         if isinstance(self.callback, TriggererCallback):
-            self.callback.data = callback_data_with_context()
+            self.callback.data = data
 
             self.callback.queue(session=session)
             session.add(self.callback)
             session.flush()
 
         elif isinstance(self.callback, ExecutorCallback):
-            data = callback_data_with_context()
-            data["deadline_id"] = str(self.id)
+            # dag_run_id (integer PK) is required by the scheduler's _enqueue_executor_callbacks
             data["dag_run_id"] = str(self.dagrun.id)
-            data["dag_id"] = self.dagrun.dag_id
             self.callback.data = data
 
             self.callback.state = CallbackState.PENDING
