@@ -39,7 +39,9 @@ from airflow.sdk.execution_time.callback_supervisor import (
 from airflow.sdk.execution_time.comms import (
     BundleInfo,
     ConnectionResult,
+    DagRunResult,
     GetConnection,
+    GetDagRun,
     GetVariable,
     GetVariableKeys,
     MaskSecret,
@@ -243,6 +245,28 @@ class TestCallbackHandleRequest:
             message=MaskSecret(value="super_secret", name="api_key"),
             test_id="mask_secret",
             mask_secret_args=("super_secret", "api_key"),
+        ),
+        RequestCase(
+            message=GetDagRun(dag_id="ctx_dag", run_id="ctx_run"),
+            test_id="get_dag_run",
+            client_mock=ClientMock(
+                method_path="dag_runs.get_detail",
+                args=("ctx_dag", "ctx_run"),
+                response=DagRunResult(
+                    dag_id="ctx_dag",
+                    run_id="ctx_run",
+                    logical_date="2024-06-15T12:30:00+00:00",
+                    data_interval_start="2024-06-15T00:00:00+00:00",
+                    data_interval_end="2024-06-16T00:00:00+00:00",
+                    run_after="2024-06-16T00:00:00+00:00",
+                    start_date="2024-06-15T12:30:00+00:00",
+                    end_date=None,
+                    run_type="scheduled",
+                    state="running",
+                    consumed_asset_events=[],
+                    partition_key=None,
+                ),
+            ),
         ),
     ]
 
@@ -608,3 +632,101 @@ class TestSuperviseCallbackExchangesTokenFirst:
             self._supervise(client)
 
         mock_start.assert_not_called()
+
+
+class TestCallbackContextFetch:
+    """Context fetching and kwarg rendering for deadline callbacks in the subprocess target."""
+
+    DAG_RUN_RESULT_KWARGS = {
+        "dag_id": "ctx_dag",
+        "run_id": "ctx_run",
+        "logical_date": "2024-06-15T12:30:00+00:00",
+        "data_interval_start": "2024-06-15T00:00:00+00:00",
+        "data_interval_end": "2024-06-16T00:00:00+00:00",
+        "run_after": "2024-06-16T00:00:00+00:00",
+        "start_date": "2024-06-15T12:30:00+00:00",
+        "end_date": None,
+        "run_type": "scheduled",
+        "state": "running",
+        "consumed_asset_events": [],
+        "partition_key": None,
+    }
+
+    @pytest.fixture(autouse=True)
+    def base_mocks_setup(self):
+        with (
+            patch("airflow.sdk.execution_time.comms.CommsDecoder") as mock_comms,
+            patch("airflow.sdk.execution_time.callback_supervisor.WatchedSubprocess.start") as mock_super,
+            patch("airflow.sdk.execution_time.callback_supervisor.execute_callback") as mock_execute,
+        ):
+            mock_execute.return_value = (True, None)
+            # The subprocess target replaces SUPERVISOR_COMMS with a fresh
+            # CommsDecoder[ToTask, CallbackToSupervisor](...) instance; capture it.
+            self.mock_comms_instance = mock_comms.__getitem__.return_value.return_value
+            self.mock_super_start = mock_super
+            self.mock_execute_callback = mock_execute
+            yield
+
+    def _start_and_run_target(self, **overrides):
+        kwargs = {
+            "id": str(uuid.uuid4()),
+            "callback_path": "my_module.my_callback",
+            "callback_kwargs": {"message": "DAG {{ dag_run.dag_id }} missed deadline at {{ ds }}"},
+            "dag_rel_path": Path("dags/my_dag.py"),
+            "bundle_info": None,
+            "client": Mock(),
+            **overrides,
+        }
+        CallbackSubprocess.start(**kwargs)
+        self.mock_super_start.call_args.kwargs["target"]()
+
+    def test_fetches_context_and_renders_kwargs(self):
+        self.mock_comms_instance.send.return_value = DagRunResult(**self.DAG_RUN_RESULT_KWARGS)
+
+        self._start_and_run_target(dag_id="ctx_dag", run_id="ctx_run")
+
+        self.mock_comms_instance.send.assert_called_once_with(GetDagRun(dag_id="ctx_dag", run_id="ctx_run"))
+        effective_kwargs = self.mock_execute_callback.call_args.kwargs["callback_kwargs"]
+        assert effective_kwargs["message"] == "DAG ctx_dag missed deadline at 2024-06-15"
+        context = effective_kwargs["context"]
+        assert context["run_id"] == "ctx_run"
+        assert context["ds"] == "2024-06-15"
+        assert "deadline" not in context
+
+    def test_deadline_metadata_exposed_in_context(self):
+        self.mock_comms_instance.send.return_value = DagRunResult(**self.DAG_RUN_RESULT_KWARGS)
+
+        self._start_and_run_target(
+            dag_id="ctx_dag",
+            run_id="ctx_run",
+            deadline_id="abc-123",
+            deadline_time="2024-06-15T13:00:00+00:00",
+        )
+
+        context = self.mock_execute_callback.call_args.kwargs["callback_kwargs"]["context"]
+        assert context["deadline"] == {"id": "abc-123", "deadline_time": "2024-06-15T13:00:00+00:00"}
+
+    def test_exits_when_context_fetch_fails(self):
+        self.mock_comms_instance.send.side_effect = RuntimeError("API down")
+
+        with pytest.raises(SystemExit) as exc_info:
+            self._start_and_run_target(dag_id="ctx_dag", run_id="ctx_run")
+
+        assert exc_info.value.code == 1
+        self.mock_execute_callback.assert_not_called()
+
+    def test_exits_on_unexpected_response_type(self):
+        self.mock_comms_instance.send.return_value = object()
+
+        with pytest.raises(SystemExit) as exc_info:
+            self._start_and_run_target(dag_id="ctx_dag", run_id="ctx_run")
+
+        assert exc_info.value.code == 1
+        self.mock_execute_callback.assert_not_called()
+
+    def test_no_fetch_without_dag_run_identifiers(self):
+        self._start_and_run_target()
+
+        self.mock_comms_instance.send.assert_not_called()
+        effective_kwargs = self.mock_execute_callback.call_args.kwargs["callback_kwargs"]
+        assert effective_kwargs == {"message": "DAG {{ dag_run.dag_id }} missed deadline at {{ ds }}"}
