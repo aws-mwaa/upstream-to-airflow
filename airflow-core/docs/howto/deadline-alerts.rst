@@ -380,12 +380,24 @@ A **custom asynchronous callback** might look like this:
 Templating and Context
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Currently, a relatively simple version of the Airflow context is passed to callables and Airflow does not run
-:ref:`concepts:jinja-templating` on the kwargs. However, Notifiers already run templating with the
-provided context as part of their execution. This means that templating can be used when using a Notifier
-as long as the variables being templated are included in the simplified context. This currently includes the
-ID and the calculated deadline time of the Deadline Alert as well as the data included in the ``GET`` REST API
-response for Dag Run. Support for more comprehensive context and templating will be added in future versions.
+An Airflow context is built at runtime and passed to callables, and Airflow runs
+:ref:`concepts:jinja-templating` on string-valued callback ``kwargs`` using that context. String kwargs
+containing ``{{ ... }}`` are rendered before the callback runs; non-string kwargs and strings without
+template markers pass through untouched, and a template that fails to render falls back to its raw value
+(logged at warning) rather than failing the callback. Templating works identically on the synchronous
+(executor) and asynchronous (triggerer) callback paths.
+
+The variables available for templating are the Deadline Alert information
+(``{{ deadline.id }}``, ``{{ deadline.deadline_time }}``) and the DagRun-level context fields
+(e.g. ``{{ dag_run.run_id }}``, ``{{ run_id }}``, ``{{ logical_date }}``, ``{{ ds }}``, ``{{ ts }}``,
+``{{ data_interval_start }}``). Task-level fields (``ti``, ``task``, etc.) are not available since
+deadline callbacks are not tied to a task.
+
+Notifiers also run their own templating over their template fields when they execute. The callback kwargs
+have already been rendered by that point, so this second pass normally finds nothing left to render. Avoid
+passing values that themselves contain ``{{ ... }}`` (for example a string taken from Dag run ``conf``): the
+notifier will try to render those a second time, and depending on the notifier it may do so without the
+Dag run context, which leaves the value empty.
 
 Deadline Calculation
 ^^^^^^^^^^^^^^^^^^^^
