@@ -33,10 +33,13 @@ import structlog
 from pydantic import Field, TypeAdapter
 
 from airflow.sdk._shared.module_loading import UNUSUAL_MODULE_PREFIX, accepts_context, accepts_keyword_args
+from airflow.sdk._shared.template_rendering import render_callback_kwargs
 from airflow.sdk.exceptions import ErrorType
 from airflow.sdk.execution_time.comms import (
+    DagRunResult,
     ErrorResponse,
     GetConnection,
+    GetDagRun,
     GetVariable,
     GetVariableKeys,
     MaskSecret,
@@ -77,9 +80,10 @@ log: FilteringBoundLogger = structlog.get_logger(logger_name="callback_superviso
 
 # The set of messages that a callback subprocess can send to the supervisor.
 # This is a minimal subset of ToSupervisor: read-only access to Connections
-# and Variables, plus MaskSecret for the secrets masker.
+# and Variables, MaskSecret for the secrets masker, and GetDagRun for building
+# the callback execution context from DagRun identifiers.
 CallbackToSupervisor = Annotated[
-    GetConnection | GetVariable | GetVariableKeys | MaskSecret,
+    GetConnection | GetDagRun | GetVariable | GetVariableKeys | MaskSecret,
     Field(discriminator="type"),
 ]
 
@@ -200,6 +204,10 @@ class CallbackSubprocess(WatchedSubprocess):
         callback_path: str,
         callback_kwargs: dict,
         dag_rel_path: os.PathLike[str],
+        dag_id: str | None = None,
+        run_id: str | None = None,
+        deadline_id: str | None = None,
+        deadline_time: str | None = None,
         bundle_info: _BundleInfoLike | None = None,
         client: Client,
         logger: FilteringBoundLogger | None = None,
@@ -243,9 +251,28 @@ class CallbackSubprocess(WatchedSubprocess):
                         exc_info=True,
                     )
 
+            # When DagRun identifiers are provided, fetch the DagRun via SUPERVISOR_COMMS,
+            # build the execution context and render Jinja templates in the kwargs —
+            # mirroring what the triggerer does for async deadline callbacks.
+            effective_kwargs = dict(callback_kwargs)
+            if dag_id and run_id:
+                deadline = (
+                    {"id": deadline_id, "deadline_time": deadline_time}
+                    if (deadline_id or deadline_time)
+                    else None
+                )
+                context = _fetch_and_build_context(
+                    task_runner.SUPERVISOR_COMMS, dag_id, run_id, _log, deadline=deadline
+                )
+                if context is None:
+                    _log.error("Cannot fetch DagRun context for callback", dag_id=dag_id, run_id=run_id)
+                    sys.exit(1)
+                effective_kwargs["context"] = context
+                effective_kwargs = render_callback_kwargs(effective_kwargs, context)
+
             success, error_msg = execute_callback(
                 callback_path=callback_path,
-                callback_kwargs=callback_kwargs,
+                callback_kwargs=effective_kwargs,
                 dag_rel_path=dag_rel_path,
                 bundle_path=bundle_path,
                 log=_log,
@@ -358,6 +385,10 @@ class CallbackSubprocess(WatchedSubprocess):
 
         if isinstance(msg, GetConnection):
             resp, dump_opts = handle_get_connection(self.client, msg)
+        elif isinstance(msg, GetDagRun):
+            # Same handling as ActivitySubprocess._handle_request for GetDagRun.
+            dr_resp = self.client.dag_runs.get_detail(msg.dag_id, msg.run_id)
+            resp = DagRunResult.from_api_response(dr_resp)
         elif isinstance(msg, GetVariable):
             resp, dump_opts = handle_get_variable(self.client, msg)
         elif isinstance(msg, GetVariableKeys):
@@ -394,12 +425,47 @@ def _configure_logging(log_path: str, client: Client) -> tuple[FilteringBoundLog
     return logger, log_file_descriptor
 
 
+def _fetch_and_build_context(
+    comms,
+    dag_id: str,
+    run_id: str,
+    _log,
+    deadline: dict | None = None,
+) -> dict | None:
+    """
+    Fetch the DagRun via SUPERVISOR_COMMS and build a standard context dict.
+
+    Called inside the forked subprocess when DagRun identifiers are available.
+    Returns a context dict with dag_run, run_id, logical_date, ds, ts, etc.
+    """
+    from airflow.sdk.execution_time.context import build_context_from_dag_run
+
+    try:
+        response = comms.send(GetDagRun(dag_id=dag_id, run_id=run_id))
+        if not isinstance(response, DagRunResult):
+            _log.warning(
+                "Unexpected response when fetching DagRun for callback context",
+                response_type=type(response).__name__,
+            )
+            return None
+        return build_context_from_dag_run(response, deadline=deadline)
+    except Exception:
+        _log.warning(
+            "Failed to fetch DagRun for callback context", dag_id=dag_id, run_id=run_id, exc_info=True
+        )
+        return None
+
+
 def supervise_callback(
     *,
     id: str,
     callback_path: str,
     callback_kwargs: dict,
     dag_rel_path: os.PathLike[str],
+    dag_id: str | None = None,
+    run_id: str | None = None,
+    deadline_id: str | None = None,
+    deadline_time: str | None = None,
     log_path: str | None = None,
     bundle_info: _BundleInfoLike | None = None,
     token: str = "",
@@ -413,6 +479,10 @@ def supervise_callback(
     :param callback_path: Dot-separated import path to the callback function or class.
     :param callback_kwargs: Keyword arguments to pass to the callback.
     :param dag_rel_path: Relative path to the DAG file.
+    :param dag_id: Dag ID for fetching DagRun context (optional, for deadline callbacks).
+    :param run_id: Run ID for fetching DagRun context (optional, for deadline callbacks).
+    :param deadline_id: Deadline ID to include in context["deadline"] (optional).
+    :param deadline_time: ISO-format deadline time to include in context["deadline"] (optional).
     :param log_path: Path to write logs, if required.
     :param bundle_info: When provided, the bundle's path is added to sys.path so callbacks in Dag Bundles are importable.
     :param token: Authentication token for the API client.
@@ -442,6 +512,10 @@ def supervise_callback(
                 callback_path=callback_path,
                 callback_kwargs=callback_kwargs,
                 dag_rel_path=dag_rel_path,
+                dag_id=dag_id,
+                run_id=run_id,
+                deadline_id=deadline_id,
+                deadline_time=deadline_time,
                 bundle_info=bundle_info,
                 client=client,
                 logger=logger,
