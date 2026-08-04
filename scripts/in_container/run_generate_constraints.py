@@ -551,10 +551,16 @@ def generate_constraints_pypi_providers(config_params: ConfigParams) -> None:
     pre_release_strategy: list[str] = []
     if config_params.allow_pre_releases:
         pre_release_requirements = build_provider_pre_release_requirements(config_params.python)
+        # opentelemetry-exporter-prometheus only ever publishes beta versions (airflow-core requires
+        # ``opentelemetry-exporter-prometheus>=0.47b0`` and released constraints already pin a beta,
+        # e.g. ``==0.65b0``). ``explicit`` drops the if-necessary fallback the default resolution
+        # would otherwise use to reach that beta, so it must be marked pre-release-allowed here,
+        # alongside the providers - otherwise the candidate resolution fails with "No solution found".
+        pre_release_requirements.append("opentelemetry-exporter-prometheus>=0.47b0")
         pre_release_strategy = ["--prerelease", "explicit"]
         console.print(
             f"[bright_blue]Allowing pre-releases for {len(pre_release_requirements)} provider "
-            "distributions - no other package can resolve to one."
+            "distributions plus opentelemetry-exporter-prometheus - no other package can resolve to one."
         )
 
     result = run_command(
