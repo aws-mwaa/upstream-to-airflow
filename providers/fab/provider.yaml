@@ -284,7 +284,7 @@ config:
           config also applies the equivalent ``AUTH_ROLE_PUBLIC`` to the Flask app used by the FAB
           auth manager, so all FAB auth code paths (FastAPI-based API server and legacy Flask
           views) honor it consistently.
-        version_added: 3.6.2
+        version_added: 3.6.3
         type: string
         example: "Admin"
         default: ""

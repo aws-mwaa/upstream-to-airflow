@@ -96,14 +96,14 @@ def get_provider_info():
                     },
                     "write_to_es": {
                         "description": "Write the task logs to the ElasticSearch\n",
-                        "version_added": "5.5.4",
+                        "version_added": "6.2.0",
                         "type": "string",
                         "example": None,
                         "default": "False",
                     },
                     "target_index": {
                         "description": "Name of the index to write to, when enabling writing the task logs to the ElasticSearch\n",
-                        "version_added": "5.5.4",
+                        "version_added": "6.2.0",
                         "type": "string",
                         "example": None,
                         "default": "airflow-logs",
@@ -152,7 +152,7 @@ def get_provider_info():
                     },
                     "max_lines_per_page": {
                         "description": "The Page size of logs to retrieve from elasticsearch using the ElasticsearchTaskHandler.\nIf this is set too low, this can cause log read queries to become very slow.\nThis is limited on the server side (default limit of 10,000).\n",
-                        "version_added": "6.4.4",
+                        "version_added": "6.5.0",
                         "type": "string",
                         "example": None,
                         "default": "1000",

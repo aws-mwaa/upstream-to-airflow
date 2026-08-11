@@ -251,7 +251,7 @@ config:
           Function must be provided as a string with the full path to the function. See
           https://github.com/apache/airflow/blob/main/providers/edge3/src/airflow/providers/edge3/cli/example_extended_sysinfo.py
           for an example implementation.
-        version_added: 3.5.0
+        version_added: 3.6.0
         type: string
         default: ~
         example: airflow.providers.edge3.cli.example_extended_sysinfo.get_example_extended_sysinfo
