@@ -74,6 +74,6 @@ class CallbackTrigger(BaseTrigger):
             yield TriggerEvent(
                 {
                     PAYLOAD_STATUS_KEY: CallbackState.FAILED,
-                    PAYLOAD_BODY_KEY: f"{message}: {traceback.format_exception(e)}",
+                    PAYLOAD_BODY_KEY: f"{message}: {''.join(traceback.format_exception(e))}",
                 }
             )

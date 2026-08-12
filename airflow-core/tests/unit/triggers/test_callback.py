@@ -132,3 +132,19 @@ class TestCallbackTrigger:
         mock_callback.assert_called_once_with(**TEST_CALLBACK_KWARGS)
         assert failure_event.payload[PAYLOAD_STATUS_KEY] == CallbackState.FAILED
         assert all(s in failure_event.payload[PAYLOAD_BODY_KEY] for s in ["raise", "RuntimeError", exc_msg])
+
+    @pytest.mark.asyncio
+    async def test_run_failure_body_is_formatted_traceback(self, trigger, mock_import_string):
+        """The failure body holds a formatted traceback, not the repr of the list of frames."""
+        mock_import_string.return_value = mock.AsyncMock(side_effect=RuntimeError("Something went wrong"))
+
+        trigger_gen = trigger.run()
+        await anext(trigger_gen)
+        failure_event = await anext(trigger_gen)
+
+        body = failure_event.payload[PAYLOAD_BODY_KEY]
+        assert body.startswith("An error occurred during execution of the callable: ")
+        assert "Traceback (most recent call last):\n" in body
+        # A list repr would render frames as "['...\\n', '...']" with escaped newlines
+        assert "['" not in body
+        assert "\\n" not in body
