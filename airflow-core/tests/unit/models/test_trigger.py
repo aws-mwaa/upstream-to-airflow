@@ -1209,6 +1209,36 @@ def test_asset_trigger_alive_triggerer_excluded(session):
     assert trigger.id not in ids
 
 
+@pytest.mark.parametrize(
+    ("triggerer_id", "expected"),
+    [
+        pytest.param(None, True, id="unassigned_included"),
+        pytest.param(999, True, id="dead_triggerer_included"),
+        pytest.param(100, False, id="alive_triggerer_excluded"),
+    ],
+)
+def test_callback_trigger_alive_triggerer_filter(session, triggerer_id, expected):
+    """Callback triggers are only returned when no live triggerer already owns them."""
+    trigger = Trigger(classpath="airflow.triggers.testing.SuccessTrigger", kwargs={})
+    trigger.triggerer_id = triggerer_id
+    session.add(trigger)
+    session.flush()
+    callback = TriggererCallback(callback_def=AsyncCallback("classpath.log.error"))
+    callback.trigger = trigger
+    session.add(callback)
+    session.flush()
+
+    result = Trigger.get_sorted_triggers(
+        capacity=10,
+        alive_triggerer_ids=[100, 200],
+        queues=None,
+        session=session,
+    )
+    ids = [row[0] for row in result]
+
+    assert (trigger.id in ids) is expected
+
+
 def test_asset_trigger_ordering_and_capacity(session):
     """Asset triggers are ordered by created_date (oldest first) and respect capacity."""
     now = datetime.datetime(2025, 1, 1, tzinfo=timezone.utc)
