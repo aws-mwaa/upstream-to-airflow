@@ -300,11 +300,12 @@ Triggerer
 In case of Triggerer, Dag authors can execute arbitrary code in Triggerer. Currently there are no
 enforcement mechanisms that would allow to isolate tasks that are using deferrable functionality from
 each other and arbitrary code from various tasks can be executed in the same process/machine. The default
-deployment runs a single Triggerer instance that handles triggers from all teams — there is no built-in
-support for per-team Triggerer instances. Additionally, the Triggerer uses an in-process Execution API
-transport that potentially bypasses JWT authentication and potentially has direct access to the metadata
-database. For multi-team deployments, Deployment Managers must run separate Triggerer instances per team
-as a deployment-level measure, but even then each instance potentially retains direct database access
+deployment runs a single Triggerer instance that handles triggers from all teams. Since Airflow 3.3.0,
+per-team Triggerer instances are supported natively: a Triggerer started with ``--team-name`` only picks up
+triggers belonging to that team's Dags (see :ref:`multi-team-triggerer`). Additionally, the Triggerer uses
+an in-process Execution API transport that potentially bypasses JWT authentication and potentially has
+direct access to the metadata database. Running a Triggerer per team therefore controls where each team's
+code executes, but it is not a security boundary — each instance potentially retains direct database access
 and a Dag author
 whose trigger code runs there can potentially access the database directly — including data belonging
 to other teams. Deployment Manager must trust that Dag authors will not abuse this capability.
@@ -490,18 +491,21 @@ potentially still executes with direct database access in the Dag File Processor
 **Dag File Processor and Triggerer are shared across teams**
    In the default deployment, a **single Dag File Processor instance** parses all Dag files and a
    **single Triggerer instance** handles all triggers — regardless of team assignment. There is no
-   built-in support for running per-team Dag File Processor or Triggerer instances. This means that
-   Dag author code from different teams executes within the same process, potentially sharing the
-   in-process Execution API and direct database access.
+   built-in support for running per-team Dag File Processor instances. This means that Dag author code
+   from different teams is parsed within the same process, potentially sharing the in-process Execution
+   API and direct database access. Per-team Triggerer instances are supported natively since Airflow
+   3.3.0 via ``airflow triggerer --team-name`` (see :ref:`multi-team-triggerer`), but unless one is
+   started per team, every team's trigger code still runs in a single shared process.
 
    For multi-team deployments that require separation, Deployment Managers must run **separate
-   Dag File Processor and Triggerer instances per team** as a deployment-level measure (for example,
-   by configuring each instance to only process bundles belonging to a specific team). However, even
-   with separate instances, each Dag File Processor and Triggerer potentially retains direct access
-   to the metadata database — a Dag author whose code runs in these components can potentially
-   retrieve credentials from the parent process and access the database directly, including reading
-   or modifying data belonging to other teams, unless the Deployment Manager implements Unix
-   user-level isolation (see :ref:`deployment-hardening-for-improved-isolation`).
+   Dag File Processor instances per team** as a deployment-level measure (for example, by configuring
+   each instance to only process bundles belonging to a specific team), and start a **Triggerer per
+   team** with ``--team-name``. However, even with separate instances, each Dag File Processor and
+   Triggerer potentially retains direct access to the metadata database — a Dag author whose code runs
+   in these components can potentially retrieve credentials from the parent process and access the
+   database directly, including reading or modifying data belonging to other teams, unless the
+   Deployment Manager implements Unix user-level isolation (see
+   :ref:`deployment-hardening-for-improved-isolation`).
 
 **No cross-workload isolation in the Execution API**
    All worker workloads authenticate to the same Execution API with tokens signed by the same key and
