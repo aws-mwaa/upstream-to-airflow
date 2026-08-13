@@ -17,6 +17,22 @@
  under the License.
  -->
 
+# v3.3.1
+
+## New Features:
+
+- Add partition date filters to the Dag run API (#70304)
+
+## Improvements:
+
+- Simplify the API docs on pattern search (#70509)
+- Document the 409 response from the XCom create endpoint (#71128)
+
+## Bug Fixes:
+
+- API: Return 503 when SQLite locks during backfill creation (#69659)
+- Reject invalid partition keys in the create asset events API (#69581)
+
 # v3.3.0
 
 ## New Features:
