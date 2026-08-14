@@ -48,7 +48,7 @@ dependencies {
 
     implementation("com.fasterxml.jackson.core:jackson-annotations:2.21")
     implementation("com.fasterxml.jackson.core:jackson-core:2.21.1")
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.21.0")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.21.5")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.21.0")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.21.0")
     implementation("com.xenomachina:kotlin-argparser:2.0.7")
