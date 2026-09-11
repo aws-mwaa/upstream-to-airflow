@@ -560,6 +560,8 @@ class TestLocalExecutorCallbackSupport:
         )
         callback_workload = workloads.ExecuteCallback(
             callback=callback_data,
+            dag_id="test_dag",
+            run_id="test_run",
             dag_rel_path=Path("test.py"),
             bundle_info=BundleInfo(name="test_bundle", version="1.0"),
             token="test_token",
@@ -572,6 +574,8 @@ class TestLocalExecutorCallbackSupport:
             id=self.CALLBACK_UUID,
             callback_path="test.module.my_callback",
             callback_kwargs={"arg1": "val1"},
+            dag_id="test_dag",
+            run_id="test_run",
             dag_rel_path=Path("test.py"),
             log_path="test.log",
             bundle_info=BundleInfo(name="test_bundle", version="1.0"),

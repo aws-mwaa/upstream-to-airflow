@@ -379,6 +379,43 @@ class CallbackSubprocess(WatchedSubprocess):
         self.send_msg(resp, request_id=req_id, error=None, **dump_opts)
 
 
+def _fetch_callback_context(
+    client: Client,
+    dag_id: str,
+    run_id: str,
+    stored_context: dict | None,
+    log: FilteringBoundLogger,
+) -> dict:
+    """
+    Build the callback ``context`` dict from a fresh Dag run fetch over the Execution API.
+
+    Falls back to whatever context was stored on the callback if the fetch fails (network error,
+    Dag run deleted in the meantime): a callback running with stale or no context beats one that dies.
+    """
+    stored_context = stored_context if isinstance(stored_context, dict) else {}
+    try:
+        dag_run = client.dag_runs.get_detail(dag_id=dag_id, run_id=run_id)
+    except Exception:
+        log.warning(
+            "Failed to fetch Dag run details for callback context; continuing with stored context",
+            dag_id=dag_id,
+            run_id=run_id,
+            exc_info=True,
+        )
+        return stored_context
+
+    context: dict = {
+        "dag_run": dag_run.model_dump(mode="json"),
+        "dag_id": dag_run.dag_id,
+        "run_id": dag_run.run_id,
+        "state": dag_run.state,
+        "logical_date": dag_run.logical_date,
+    }
+    if deadline := stored_context.get("deadline"):
+        context["deadline"] = deadline
+    return context
+
+
 def _configure_logging(log_path: str, client: Client) -> tuple[FilteringBoundLogger, BinaryIO]:
     """Configure file-based logging for the callback subprocess."""
     from airflow.sdk.execution_time.supervisor import _remote_logging_conn
@@ -400,6 +437,8 @@ def supervise_callback(
     callback_path: str,
     callback_kwargs: dict,
     dag_rel_path: os.PathLike[str],
+    dag_id: str | None = None,
+    run_id: str | None = None,
     log_path: str | None = None,
     bundle_info: _BundleInfoLike | None = None,
     token: str = "",
@@ -412,6 +451,9 @@ def supervise_callback(
     :param id: Unique identifier for this callback execution.
     :param callback_path: Dot-separated import path to the callback function or class.
     :param callback_kwargs: Keyword arguments to pass to the callback.
+    :param dag_id: Dag ID of the Dag run the callback fires for; with ``run_id``, enables
+        fetching fresh context at execution time.
+    :param run_id: Run ID of the Dag run the callback fires for.
     :param dag_rel_path: Relative path to the DAG file.
     :param log_path: Path to write logs, if required.
     :param bundle_info: When provided, the bundle's path is added to sys.path so callbacks in Dag Bundles are importable.
@@ -435,6 +477,14 @@ def supervise_callback(
 
         # Swap the single-use callback token for an execution token before any context read.
         client.callbacks.run(UUID(id))
+
+        # Fetch the Dag run as it is now, so the callback sees fire-time state rather than
+        # the snapshot taken when the callback was queued.
+        if dag_id and run_id:
+            if context := _fetch_callback_context(
+                client, dag_id, run_id, callback_kwargs.get("context"), logger
+            ):
+                callback_kwargs = {**callback_kwargs, "context": context}
 
         try:
             process = CallbackSubprocess.start(

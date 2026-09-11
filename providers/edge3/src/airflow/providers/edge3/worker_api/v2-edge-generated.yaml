@@ -1100,6 +1100,16 @@ components:
           title: Log Path
         callback:
           $ref: '#/components/schemas/CallbackDTO'
+        dag_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Dag Id
+        run_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Run Id
         type:
           type: string
           const: ExecuteCallback

@@ -23,6 +23,7 @@ import signal
 import socket
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from operator import attrgetter
 from typing import Any
 from unittest.mock import ANY, Mock, patch
@@ -30,6 +31,7 @@ from unittest.mock import ANY, Mock, patch
 import pytest
 import structlog
 
+from airflow.sdk.api.datamodels._generated import DagRun, DagRunState, DagRunType
 from airflow.sdk.execution_time.callback_supervisor import (
     CallbackSubprocess,
     Path,
@@ -595,3 +597,111 @@ class TestSuperviseCallbackExchangesTokenFirst:
             self._supervise(client)
 
         mock_start.assert_not_called()
+
+
+class TestSuperviseCallbackFetchesContext:
+    """The callback context is fetched fresh over the Execution API at execution time."""
+
+    CALLBACK_ID = "01890a5d-ac70-7a5b-b7d5-0dd5b1c7be47"
+    LOGICAL_DATE = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    def _dag_run(self):
+        return DagRun(
+            dag_id="test_dag",
+            run_id="test_run",
+            logical_date=self.LOGICAL_DATE,
+            data_interval_start=None,
+            data_interval_end=None,
+            run_after=self.LOGICAL_DATE,
+            start_date=self.LOGICAL_DATE,
+            end_date=None,
+            run_type=DagRunType.SCHEDULED,
+            state=DagRunState.RUNNING,
+            consumed_asset_events=[],
+            partition_key=None,
+        )
+
+    def _supervise(self, client, callback_kwargs=None, dag_id="test_dag", run_id="test_run"):
+        return supervise_callback(
+            id=self.CALLBACK_ID,
+            callback_path="does.not.matter",
+            callback_kwargs=callback_kwargs or {},
+            dag_id=dag_id,
+            run_id=run_id,
+            dag_rel_path=Path("dag.py"),
+            client=client,
+        )
+
+    @patch("airflow.sdk.execution_time.callback_supervisor._make_process_nondumpable")
+    @patch.object(CallbackSubprocess, "start")
+    def test_fetched_context_reaches_the_callback(self, mock_start, _nondumpable):
+        calls: list[str] = []
+        client = Mock()
+        client.callbacks.run.side_effect = lambda callback_id: calls.append("exchange")
+        client.dag_runs.get_detail.side_effect = lambda **kwargs: calls.append("fetch") or self._dag_run()
+        mock_start.return_value = Mock(wait=Mock(return_value=0))
+
+        assert self._supervise(client, callback_kwargs={"arg1": "val1"}) == 0
+
+        client.dag_runs.get_detail.assert_called_once_with(dag_id="test_dag", run_id="test_run")
+        assert calls == ["exchange", "fetch"]
+
+        passed_kwargs = mock_start.call_args.kwargs["callback_kwargs"]
+        assert passed_kwargs["arg1"] == "val1"
+        context = passed_kwargs["context"]
+        assert context["dag_id"] == "test_dag"
+        assert context["run_id"] == "test_run"
+        assert context["state"] == DagRunState.RUNNING
+        assert context["logical_date"] == self.LOGICAL_DATE
+        assert context["dag_run"]["run_id"] == "test_run"
+
+    @patch("airflow.sdk.execution_time.callback_supervisor._make_process_nondumpable")
+    @patch.object(CallbackSubprocess, "start")
+    def test_fresh_context_replaces_stored_snapshot_but_keeps_deadline(self, mock_start, _nondumpable):
+        client = Mock()
+        client.dag_runs.get_detail.return_value = self._dag_run()
+        mock_start.return_value = Mock(wait=Mock(return_value=0))
+        stored = {
+            "dag_run": {"state": "queued"},
+            "deadline": {"id": "abc", "deadline_time": "2026-09-01T00:00:00+00:00"},
+        }
+
+        assert self._supervise(client, callback_kwargs={"context": stored}) == 0
+
+        context = mock_start.call_args.kwargs["callback_kwargs"]["context"]
+        assert context["dag_run"]["state"] == "running"
+        assert context["deadline"] == stored["deadline"]
+
+    @pytest.mark.parametrize(
+        ("stored_kwargs", "expected_kwargs"),
+        [
+            pytest.param(
+                {"context": {"deadline": {"id": "abc"}}},
+                {"context": {"deadline": {"id": "abc"}}},
+                id="falls_back_to_stored_context",
+            ),
+            pytest.param({"arg1": "val1"}, {"arg1": "val1"}, id="runs_without_context"),
+        ],
+    )
+    @patch("airflow.sdk.execution_time.callback_supervisor._make_process_nondumpable")
+    @patch.object(CallbackSubprocess, "start")
+    def test_fetch_failure_does_not_fail_the_callback(
+        self, mock_start, _nondumpable, stored_kwargs, expected_kwargs
+    ):
+        client = Mock()
+        client.dag_runs.get_detail.side_effect = RuntimeError("API server unreachable")
+        mock_start.return_value = Mock(wait=Mock(return_value=0))
+
+        assert self._supervise(client, callback_kwargs=stored_kwargs) == 0
+
+        assert mock_start.call_args.kwargs["callback_kwargs"] == expected_kwargs
+
+    @patch("airflow.sdk.execution_time.callback_supervisor._make_process_nondumpable")
+    @patch.object(CallbackSubprocess, "start")
+    def test_no_fetch_without_dag_run_identity(self, mock_start, _nondumpable):
+        client = Mock()
+        mock_start.return_value = Mock(wait=Mock(return_value=0))
+
+        assert self._supervise(client, dag_id=None, run_id=None) == 0
+
+        client.dag_runs.get_detail.assert_not_called()
