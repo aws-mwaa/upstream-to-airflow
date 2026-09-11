@@ -358,3 +358,36 @@ class TestExecuteCallbackMakeVersionData:
 
         assert workload.bundle_info.version == "abc123"
         assert workload.bundle_info.version_data is None
+
+
+class TestExecuteCallbackMakeDagRunIdentity:
+    """Tests for ExecuteCallback.make() carrying the Dag run identity for context fetching."""
+
+    def test_make_populates_dag_id_and_run_id(self):
+        callback, dag_run = TestExecuteCallbackMakeVersionData._make_mocks(
+            bundle_version="abc123", version_data=None
+        )
+
+        workload = ExecuteCallback.make(callback=callback, dag_run=dag_run)
+
+        assert workload.dag_id == "test_dag"
+        assert workload.run_id == "test_run"
+
+    def test_dag_run_identity_defaults_to_none(self):
+        """Payloads without the identity fields (older schedulers) must still deserialize."""
+        workload = ExecuteCallback.model_validate_json(
+            ExecuteCallback(
+                callback=CallbackDTO(
+                    id=str(uuid4()),
+                    fetch_method=CallbackFetchMethod.IMPORT_PATH,
+                    data={"path": "my_module.my_callback"},
+                ),
+                dag_rel_path=PurePosixPath("dags/test_dag.py"),
+                bundle_info=BundleInfo(name="test-bundle"),
+                token="",
+                log_path=None,
+            ).model_dump_json(exclude={"dag_id", "run_id"})
+        )
+
+        assert workload.dag_id is None
+        assert workload.run_id is None

@@ -75,6 +75,10 @@ class ExecuteCallback(BaseDagBundleWorkload):
 
     callback: CallbackDTO
 
+    dag_id: str | None = None
+    run_id: str | None = None
+    """Identity of the Dag run the callback fires for, used to fetch fresh context at execution time."""
+
     type: Literal["ExecuteCallback"] = Field(init=False, default="ExecuteCallback")
 
     token_scope: ClassVar[str] = "callback"
@@ -128,6 +132,8 @@ class ExecuteCallback(BaseDagBundleWorkload):
 
         return cls(
             callback=CallbackDTO.model_validate(callback, from_attributes=True),
+            dag_id=dag_run.dag_id,
+            run_id=dag_run.run_id,
             dag_rel_path=dag_rel_path or Path(dag_run.dag_model.relative_fileloc or ""),
             token=cls.generate_token(str(callback.id), generator),
             log_path=fname,
