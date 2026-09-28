@@ -52,6 +52,10 @@ regular-file CLAUDE.md would make every arm read identical guidance.
 - **Claude authentication** (one of):
   - Claude Code session (`claude /login`) — Pro/Max subscription
   - `ANTHROPIC_API_KEY` environment variable — API credits
+  - Amazon Bedrock (`CLAUDE_CODE_USE_BEDROCK=1` and AWS credentials): also
+    set `MODEL` to a Bedrock inference profile ID such as
+    `global.anthropic.claude-sonnet-5-5`, since Bedrock rejects the default
+    Claude API model ID
 - **Codex authentication** (when using the Codex runtime): a Codex CLI
   session (`codex login`)
 

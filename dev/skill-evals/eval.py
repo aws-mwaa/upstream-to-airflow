@@ -298,7 +298,7 @@ def main() -> int:
 
     model = os.environ.get("MODEL")
     if not model and runtime == "claude":
-        model = "claude-sonnet-4-6"
+        model = "claude-sonnet-5-5"
     skill_name = os.environ.get("SKILL_NAME")
     skill_src = None
     if skill_name:
