@@ -95,6 +95,10 @@ Node.js version. Each one must then name its own Dag bundle, so Dag processing k
 to parse a bundle. With a single `NodeCoordinator` it is optional: omit it and the coordinator finds the bundle
 in the task's own Dag bundle.
 
+The Dag processor parses `typescript_native_example` from `bundle.min.mjs` with `node`, so it needs
+`node` on `PATH`, or set `node_executable` in the coordinator's `kwargs`. See
+[Parsing native Dags](../../airflow-core/docs/authoring-and-scheduling/language-sdks/typescript.rst#parsing-native-dags).
+
 Copy both files in `dags/` into your Airflow Dags folder.
 
 The example also reads one Variable and one Connection:
@@ -116,4 +120,5 @@ Then start Airflow and trigger the Dag:
 ```bash
 airflow dags trigger typescript_example
 airflow dags trigger typescript_taskflow_example
+airflow dags trigger typescript_native_example
 ```
