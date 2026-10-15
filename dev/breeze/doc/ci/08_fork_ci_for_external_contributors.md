@@ -181,6 +181,11 @@ concurrency cap. A manual `workflow_dispatch` in a fork still runs.
 | Author login is in `[allowlist]` | run | `allowlisted` |
 | Anything else | skip | `external` |
 
+The table applies once the base branch carries the gate. When the base branch has neither
+`.github/fork-ci-gate.toml` nor `fork_ci_gate.py` (the pull request that introduces the gate,
+or a release branch cut before it), the job runs project CI with reason `base_without_gate`,
+as it did before the gate existed. A base branch with only one of the two files fails the job.
+
 "Gated" throughout this document means a pull request whose decision reason is `external`,
 `pilot` or `label_fork_ci`. The reconciler labels exactly those; an `adhoc_branch` skip is
 not a pull request and is never labelled.
@@ -240,7 +245,10 @@ would be closed for gate tampering. The `check-fork-ci-gate-config` prek hook re
 added `[pilot]` instant, an `enabled_since` moved later, or `enabled` switched on while
 `enabled_since` is still in the past; contributors use the next day at 00:00 UTC. Moving
 `enabled_since` earlier is the backlog reset and is allowed. In CI the hook fetches the pull
-request's base branch to compare with, because the shallow checkout has none. A merge after that instant still leaves the window open; the
+request's base branch to compare with, because the shallow checkout has none; a push in a
+contributor's fork has no base branch, so it fetches `apache/airflow`'s `main`. Without any
+base to compare with, the hook fails rather than comparing the change with itself. A merge
+after that instant still leaves the window open; the
 closure is reported to Slack as an attention item, and the maintainer reopens the pull
 request with `use project ci`.
 
@@ -279,7 +287,8 @@ directly with the runner's `python3` without installing breeze. The reconciler i
    the shared token quota would otherwise switch the gate off for every pull request.
 3. `python3 dev/breeze/src/airflow_breeze/utils/fork_ci_gate.py` with the event payload
    fields and the labels passed as environment variables. It writes `project-ci=true|false`
-   and `reason=...` to `GITHUB_OUTPUT`.
+   and `reason=...` to `GITHUB_OUTPUT`. A base branch with neither file skips the script and
+   writes `project-ci=true` with `reason=base_without_gate`.
 
 `build-info` gains `needs: [gate]` and `if: needs.gate.outputs.project-ci == 'true'`. Every
 other job already depends on `build-info`, so a gated pull request produces a run in which the

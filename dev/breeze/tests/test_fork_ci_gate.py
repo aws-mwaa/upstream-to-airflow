@@ -22,8 +22,10 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 
 from airflow_breeze.utils.fork_ci_gate import (
+    CANONICAL_PUSH_BRANCH_PATTERNS,
     Decision,
     GateConfig,
     GateEvent,
@@ -269,6 +271,16 @@ def _push(repository: str, branch: str) -> GateEvent:
 )
 def test_decide(event: GateEvent, config_overrides: dict, expected: Decision):
     assert decide(event, _config(**config_overrides)) == expected
+
+
+def test_canonical_branch_patterns_match_arm_push_trigger():
+    workflow = yaml.safe_load((AIRFLOW_ROOT_PATH / ".github" / "workflows" / "ci-arm.yml").read_text())
+    # PyYAML parses the bare `on:` key as boolean True.
+    arm_branches = workflow[True]["push"]["branches"]
+
+    assert [
+        pattern.pattern.removeprefix("^").removesuffix("$") for pattern in CANONICAL_PUSH_BRANCH_PATTERNS
+    ] == (arm_branches)
 
 
 def test_repository_config_is_dormant():
