@@ -2915,6 +2915,44 @@ def test_expected_output_push(
 
 
 @pytest.mark.parametrize(
+    ("files", "fork_changes_truncated", "expected_outputs"),
+    [
+        pytest.param(
+            ("airflow-core/docs/index.rst",),
+            False,
+            {"full-tests-needed": "false", "all-versions": "false", "is-committer-build": "false"},
+            id="Fork push of a docs change does not run everything",
+        ),
+        pytest.param(
+            (),
+            False,
+            {"full-tests-needed": "false", "basic-checks-only": "true", "is-committer-build": "false"},
+            id="Fork push without changes against upstream runs basic checks only",
+        ),
+        pytest.param(
+            ("airflow-core/docs/index.rst",),
+            True,
+            {"full-tests-needed": "true", "all-versions": "true", "is-committer-build": "false"},
+            id="Fork push with a truncated change set runs everything",
+        ),
+    ],
+)
+def test_expected_output_fork_push(
+    files: tuple[str, ...], fork_changes_truncated: bool, expected_outputs: dict[str, str]
+):
+    stderr = SelectiveChecks(
+        files=files,
+        commit_ref=NEUTRAL_COMMIT,
+        github_event=GithubEvents.PUSH,
+        github_repository="potiuk/airflow",
+        github_actor="potiuk",
+        fork_push=True,
+        fork_changes_truncated=fork_changes_truncated,
+    )
+    assert_outputs_are_printed(expected_outputs, str(stderr))
+
+
+@pytest.mark.parametrize(
     ("files", "expected_outputs"),
     [
         pytest.param(
