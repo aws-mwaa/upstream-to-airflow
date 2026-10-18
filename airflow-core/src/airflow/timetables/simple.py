@@ -246,10 +246,12 @@ class AssetTriggeredTimetable(_TrivialTimetable):
     def deserialize(cls, data: dict[str, Any]) -> Timetable:
         from airflow.serialization.decoders import decode_asset_like
 
-        return cls(
-            decode_asset_like(data["asset_condition"]),
-            batch_asset_events=data.get("batch_asset_events", True),
-        )
+        # Only pass batch_asset_events when it is present so blobs that predate the field
+        # (or any missing it) fall back to the construct-time default, not a hardcoded True.
+        kwargs: dict[str, Any] = {}
+        if "batch_asset_events" in data:
+            kwargs["batch_asset_events"] = data["batch_asset_events"]
+        return cls(decode_asset_like(data["asset_condition"]), **kwargs)
 
     @property
     def summary(self) -> str:
@@ -460,13 +462,18 @@ class PartitionedAssetTimetable(AssetTriggeredTimetable):
         default_partition_mapper_data = data["default_partition_mapper"]
         partition_mapper_mappping_data = data["partition_mapper_config"]
 
+        # Only pass batch_asset_events when present so a blob missing it falls back to the
+        # construct-time default (partitioned timetables require batching) rather than a hardcoded True.
+        kwargs: dict[str, Any] = {}
+        if "batch_asset_events" in data:
+            kwargs["batch_asset_events"] = data["batch_asset_events"]
         timetable = cls(
             assets=decode_asset_like(data["asset_condition"]),
-            batch_asset_events=data.get("batch_asset_events", True),
             default_partition_mapper=decode_partition_mapper(default_partition_mapper_data),
             partition_mapper_config={
                 decode_asset_like(ser_asest): decode_partition_mapper(ser_partition_mapper)
                 for ser_asest, ser_partition_mapper in partition_mapper_mappping_data
             },
+            **kwargs,
         )
         return timetable
