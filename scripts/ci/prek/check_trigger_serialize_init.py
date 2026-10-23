@@ -49,6 +49,22 @@ Classes whose ``serialize()`` is built in any other dynamic way (``**spread`` of
 value, reassignment of the return variable, ``.update()`` with a non-literal argument, ...) or
 that inherit ``__init__``/``serialize()`` from a base class defined in another file cannot be
 resolved statically and are skipped -- the check never guesses, so it produces no false positives.
+
+The one out-of-file base the check does resolve is the Amazon provider's ``AwsBaseWaiterTrigger``,
+recognized by its import from ``airflow.providers.amazon.aws.triggers.base``. Its ``serialize()``
+returns a fixed set of keys (``AWS_BASE_WAITER_TRIGGER_KEYS``) plus the keys of the
+``serialized_fields`` dict its subclass passes to ``super().__init__()``. A trigger that inherits
+that ``serialize()`` (directly, or through in-file intermediate bases that do not define
+``serialize()`` themselves) is checked against those keys when:
+
+* every class in the chain has a single base;
+* every ``__init__`` in the chain calls ``super().__init__()`` exactly once;
+* the ``super().__init__()`` call that reaches ``AwsBaseWaiterTrigger`` passes
+  ``serialized_fields=`` as a dict literal with string-constant keys and no ``**spread``.
+
+An in-file intermediate base (another class in the file inherits from it) is not checked on its
+own: only its subclasses are reconstructed on the triggerer, and they may hardcode some of its
+``__init__`` arguments (``waiter_name`` for example). The subclasses are checked instead.
 """
 
 from __future__ import annotations
@@ -80,7 +96,19 @@ BY_DESIGN_EXCLUSIONS: set[str] = {
     # `region` is a deprecated alias folded into `region_name` in __init__; serializing only
     # `region_name` preserves the value and avoids re-triggering the deprecation path on restart.
     "amazon/src/airflow/providers/amazon/aws/triggers/ecs.py::TaskDoneTrigger",
+    # `poke_interval` and `max_attempts` are deprecated aliases folded into `waiter_delay` and
+    # `waiter_max_attempts` in __init__; the serialized replacements preserve their values.
+    "amazon/src/airflow/providers/amazon/aws/triggers/sagemaker.py::SageMakerTrigger",
 }
+
+
+AWS_BASE_WAITER_TRIGGER_MODULE = "airflow.providers.amazon.aws.triggers.base"
+AWS_BASE_WAITER_TRIGGER_NAME = "AwsBaseWaiterTrigger"
+# Keys that ``AwsBaseWaiterTrigger.serialize()`` returns on top of the subclass's ``serialized_fields``.
+# Keep in sync with amazon/src/airflow/providers/amazon/aws/triggers/base.py.
+AWS_BASE_WAITER_TRIGGER_KEYS = frozenset(
+    {"waiter_delay", "waiter_max_attempts", "aws_conn_id", "region_name", "verify", "botocore_config"}
+)
 
 
 def _get_init_param_names(func: ast.FunctionDef) -> set[str]:
@@ -125,6 +153,21 @@ def _walk_skip_nested(node: ast.AST) -> Iterator[ast.AST]:
         yield from _walk_skip_nested(child)
 
 
+def _get_super_init_call(func: ast.FunctionDef) -> ast.Call | None:
+    """Return the only ``super().__init__(...)`` call in *func*, or ``None`` if there is not exactly one."""
+    calls = [
+        node
+        for node in _walk_skip_nested(func)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "__init__"
+        and isinstance(node.func.value, ast.Call)
+        and isinstance(node.func.value.func, ast.Name)
+        and node.func.value.func.id == "super"
+    ]
+    return calls[0] if len(calls) == 1 else None
+
+
 class ModuleAnalyzer:
     """Resolves trigger __init__/serialize() pairs within a single module, following in-file bases."""
 
@@ -133,6 +176,19 @@ class ModuleAnalyzer:
         tree = ast.parse(path.read_text("utf-8"), str(path))
         self.classes: dict[str, ast.ClassDef] = {
             node.name: node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+        }
+        self.waiter_base_names: set[str] = {
+            alias.asname or alias.name
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom) and node.module == AWS_BASE_WAITER_TRIGGER_MODULE
+            for alias in node.names
+            if alias.name == AWS_BASE_WAITER_TRIGGER_NAME
+        }
+        self.in_file_parents: set[str] = {
+            base
+            for cls in self.classes.values()
+            for base in _get_base_simple_names(cls)
+            if base in self.classes and base != cls.name
         }
 
     def _in_file_base(self, cls: ast.ClassDef) -> ast.ClassDef | None:
@@ -329,6 +385,48 @@ class ModuleAnalyzer:
             return None
         return self._get_serialize_keys(base, _seen)
 
+    def _get_waiter_serialize_keys(self, cls: ast.ClassDef) -> set[str] | None:
+        """
+        Resolve the keys ``AwsBaseWaiterTrigger.serialize()`` returns for *cls*.
+
+        Returns ``None`` when *cls* is an in-file intermediate base, when any class in its chain
+        defines ``serialize()`` or does not lead to ``AwsBaseWaiterTrigger``, or when the
+        ``serialized_fields`` passed to ``AwsBaseWaiterTrigger.__init__()`` is not a literal dict.
+        """
+        if cls.name in self.in_file_parents or self._resolve_method(cls, "serialize") is not None:
+            return None
+        # The highest ``__init__`` in the chain is the one whose ``super().__init__()`` reaches
+        # ``AwsBaseWaiterTrigger.__init__()``.
+        super_init: ast.Call | None = None
+        current: ast.ClassDef | None = cls
+        seen: set[str] = set()
+        while True:
+            if current is None or current.name in seen:
+                return None
+            seen.add(current.name)
+            if len(current.bases) != 1 or not isinstance(current.bases[0], ast.Name):
+                return None
+            init = _get_method(current, "__init__")
+            if init is not None:
+                super_init = _get_super_init_call(init)
+                if super_init is None:
+                    return None
+            base_name = current.bases[0].id
+            if base_name in self.waiter_base_names:
+                break
+            current = self.classes.get(base_name)
+        if super_init is None:
+            return None
+        fields = next((kw.value for kw in super_init.keywords if kw.arg == "serialized_fields"), None)
+        if not isinstance(fields, ast.Dict):
+            return None
+        keys = set(AWS_BASE_WAITER_TRIGGER_KEYS)
+        for key in fields.keys:
+            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                return None  # ``**spread`` or non-constant key
+            keys.add(key.value)
+        return keys
+
     def get_violations(self) -> list[tuple[str, list[str]]]:
         """Return ``(class_name, [missing params])`` for every resolvable trigger that violates."""
         results: list[tuple[str, list[str]]] = []
@@ -343,6 +441,8 @@ class ModuleAnalyzer:
                 continue  # __init__ inherited from an out-of-file base -- cannot resolve.
             params = _get_init_param_names(init_resolved[0])
             serialize_keys = self._get_serialize_keys(cls)
+            if serialize_keys is None:
+                serialize_keys = self._get_waiter_serialize_keys(cls)
             if serialize_keys is None:
                 continue  # serialize() dynamic or inherited from an out-of-file base.
             missing = sorted(params - serialize_keys)
@@ -381,7 +481,8 @@ def main(argv: list[str]) -> int:
         console.print(
             f"\n[red]Found {error_count} trigger(s) whose serialize() drops __init__ parameters.[/]\n"
             "Every __init__ parameter must appear in the serialize() return dict, otherwise it is "
-            "silently lost when the triggerer re-instantiates the trigger.\n"
+            "silently lost when the triggerer re-instantiates the trigger. For an AwsBaseWaiterTrigger "
+            "subclass, add the parameter to the serialized_fields passed to super().__init__().\n"
             f"See: {DEFERRING_DOC}\n"
         )
     return 1 if error_count else 0

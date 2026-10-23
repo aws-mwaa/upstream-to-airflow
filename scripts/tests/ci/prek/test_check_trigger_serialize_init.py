@@ -324,3 +324,307 @@ class TestUnresolvedSerializeShapes:
             """,
         )
         assert analyzer._get_serialize_keys(analyzer.classes["FooTrigger"]) is None
+
+
+WAITER_BASE_KEYS = {
+    "waiter_delay",
+    "waiter_max_attempts",
+    "aws_conn_id",
+    "region_name",
+    "verify",
+    "botocore_config",
+}
+
+
+class TestAwsBaseWaiterTriggerResolver:
+    """Subclasses that inherit ``serialize()`` from ``AwsBaseWaiterTrigger`` in another file."""
+
+    def test_missing_serialized_field_flagged(self, analyzer_factory) -> None:
+        """Mirrors ``EmrCreateJobFlowTrigger``: ``waiter_name`` is passed to the base but not serialized."""
+        analyzer = analyzer_factory(
+            """
+            from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger
+
+            class FooTrigger(AwsBaseWaiterTrigger):
+                def __init__(self, job_id, waiter_name="done", waiter_delay=30, aws_conn_id=None):
+                    super().__init__(
+                        serialized_fields={"job_id": job_id},
+                        waiter_name=waiter_name,
+                        waiter_delay=waiter_delay,
+                        aws_conn_id=aws_conn_id,
+                    )
+            """,
+        )
+        assert analyzer.get_violations() == [("FooTrigger", ["waiter_name"])]
+
+    def test_complete_trigger_passes(self, analyzer_factory) -> None:
+        analyzer = analyzer_factory(
+            """
+            from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger
+
+            class FooTrigger(AwsBaseWaiterTrigger):
+                def __init__(
+                    self,
+                    job_id,
+                    waiter_name="done",
+                    waiter_delay=30,
+                    waiter_max_attempts=60,
+                    aws_conn_id=None,
+                    region_name=None,
+                    verify=None,
+                    botocore_config=None,
+                ):
+                    super().__init__(
+                        serialized_fields={"job_id": job_id, "waiter_name": waiter_name},
+                        waiter_name=waiter_name,
+                        waiter_delay=waiter_delay,
+                        waiter_max_attempts=waiter_max_attempts,
+                        aws_conn_id=aws_conn_id,
+                        region_name=region_name,
+                        verify=verify,
+                        botocore_config=botocore_config,
+                    )
+            """,
+        )
+        keys = analyzer._get_waiter_serialize_keys(analyzer.classes["FooTrigger"])
+        assert keys == WAITER_BASE_KEYS | {"job_id", "waiter_name"}
+        assert analyzer.get_violations() == []
+
+    @pytest.mark.parametrize(
+        ("import_line", "base", "resolved"),
+        [
+            pytest.param(
+                "from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger as Base",
+                "Base",
+                True,
+                id="aliased-import",
+            ),
+            pytest.param(
+                "from airflow.providers.amazon.aws.triggers import base",
+                "base.AwsBaseWaiterTrigger",
+                False,
+                id="attribute-base-skipped",
+            ),
+            pytest.param(
+                "from some.other.module import AwsBaseWaiterTrigger",
+                "AwsBaseWaiterTrigger",
+                False,
+                id="other-module-skipped",
+            ),
+        ],
+    )
+    def test_base_recognised_by_import_path(
+        self, analyzer_factory, import_line: str, base: str, resolved: bool
+    ) -> None:
+        analyzer = analyzer_factory(
+            f"""
+            {import_line}
+
+            class FooTrigger({base}):
+                def __init__(self, job_id, waiter_name):
+                    super().__init__(serialized_fields={{"job_id": job_id}}, waiter_name=waiter_name)
+            """,
+        )
+        keys = analyzer._get_waiter_serialize_keys(analyzer.classes["FooTrigger"])
+        assert (keys is not None) is resolved
+        assert analyzer.get_violations() == ([("FooTrigger", ["waiter_name"])] if resolved else [])
+
+    def test_inheritance_through_intermediate_base(self, analyzer_factory) -> None:
+        """
+        Mirrors ``BedrockBaseBatchInferenceTrigger``: the base takes ``waiter_name`` and each subclass
+        hardcodes it. The base is checked through its subclasses, so only a subclass that exposes a
+        parameter it does not serialize is flagged.
+        """
+        analyzer = analyzer_factory(
+            """
+            from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger
+
+            class FooBaseTrigger(AwsBaseWaiterTrigger):
+                def __init__(self, *, job_arn, waiter_name=None, waiter_delay=120):
+                    super().__init__(
+                        serialized_fields={"job_arn": job_arn},
+                        waiter_name=waiter_name,
+                        waiter_delay=waiter_delay,
+                    )
+
+            class FooCompletedTrigger(FooBaseTrigger):
+                def __init__(self, *, job_arn, waiter_delay=120):
+                    super().__init__(waiter_name="completed", job_arn=job_arn, waiter_delay=waiter_delay)
+
+            class FooAnyStateTrigger(FooBaseTrigger):
+                def __init__(self, *, job_arn, waiter_name="completed"):
+                    super().__init__(waiter_name=waiter_name, job_arn=job_arn)
+            """,
+        )
+        assert analyzer._get_waiter_serialize_keys(analyzer.classes["FooBaseTrigger"]) is None
+        keys = analyzer._get_waiter_serialize_keys(analyzer.classes["FooCompletedTrigger"])
+        assert keys == WAITER_BASE_KEYS | {"job_arn"}
+        assert analyzer.get_violations() == [("FooAnyStateTrigger", ["waiter_name"])]
+
+    def test_intermediate_base_without_init(self, analyzer_factory) -> None:
+        """With no ``__init__`` in the intermediate base, the subclass's call reaches the waiter base."""
+        analyzer = analyzer_factory(
+            """
+            from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger
+
+            class FooMixinTrigger(AwsBaseWaiterTrigger):
+                aws_hook_class = object
+
+            class FooTrigger(FooMixinTrigger):
+                def __init__(self, job_id, waiter_name):
+                    super().__init__(serialized_fields={"job_id": job_id}, waiter_name=waiter_name)
+            """,
+        )
+        assert analyzer.get_violations() == [("FooTrigger", ["waiter_name"])]
+
+    @pytest.mark.parametrize(
+        "super_init",
+        [
+            pytest.param(
+                "super().__init__(serialized_fields=fields, waiter_name=waiter_name)", id="variable"
+            ),
+            pytest.param(
+                'super().__init__(serialized_fields={**fields, "a": a}, waiter_name=waiter_name)',
+                id="spread",
+            ),
+            pytest.param(
+                "super().__init__(serialized_fields={KEY: a}, waiter_name=waiter_name)",
+                id="non-constant-key",
+            ),
+            pytest.param(
+                "super().__init__(serialized_fields=dict(a=a), waiter_name=waiter_name)",
+                id="dict-call",
+            ),
+            pytest.param("super().__init__(waiter_name=waiter_name, **kwargs)", id="no-keyword"),
+        ],
+    )
+    def test_non_literal_serialized_fields_skipped(self, analyzer_factory, super_init: str) -> None:
+        analyzer = analyzer_factory(
+            f"""
+            from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger
+
+            KEY = "a"
+
+            class FooTrigger(AwsBaseWaiterTrigger):
+                def __init__(self, a, waiter_name, **kwargs):
+                    fields = {{"a": a}}
+                    {super_init}
+            """,
+        )
+        assert analyzer._get_waiter_serialize_keys(analyzer.classes["FooTrigger"]) is None
+        assert analyzer.get_violations() == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param(
+                """
+                class FooTrigger(AwsBaseWaiterTrigger):
+                    def __init__(self, a, waiter_name):
+                        if a:
+                            super().__init__(serialized_fields={"a": a}, waiter_name=waiter_name)
+                        else:
+                            super().__init__(serialized_fields={"a": a}, waiter_name="other")
+                """,
+                id="two-super-init-calls",
+            ),
+            pytest.param(
+                """
+                class FooBaseTrigger(AwsBaseWaiterTrigger):
+                    def __init__(self, a, waiter_name):
+                        super().__init__(serialized_fields={"a": a}, waiter_name=waiter_name)
+
+                class FooTrigger(FooBaseTrigger):
+                    def __init__(self, a, waiter_name):
+                        self.a = a
+                """,
+                id="no-super-init-call",
+            ),
+            pytest.param(
+                """
+                class FooTrigger(SomeMixin, AwsBaseWaiterTrigger):
+                    def __init__(self, a, waiter_name):
+                        super().__init__(serialized_fields={"a": a}, waiter_name=waiter_name)
+                """,
+                id="multiple-bases",
+            ),
+            pytest.param(
+                """
+                class FooTrigger(OtherBaseTrigger):
+                    def __init__(self, a, waiter_name):
+                        super().__init__(serialized_fields={"a": a}, waiter_name=waiter_name)
+                """,
+                id="other-out-of-file-base",
+            ),
+        ],
+    )
+    def test_unresolvable_chain_skipped(self, analyzer_factory, source: str) -> None:
+        analyzer = analyzer_factory(
+            "from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger\n"
+            + textwrap.dedent(source),
+        )
+        assert analyzer._get_waiter_serialize_keys(analyzer.classes["FooTrigger"]) is None
+        assert analyzer.get_violations() == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param(
+                """
+                class FooTrigger(AwsBaseWaiterTrigger):
+                    def __init__(self, a, b):
+                        super().__init__(serialized_fields={"a": a, "b": b})
+                        self.a = a
+                    def serialize(self):
+                        return "x.FooTrigger", {"a": self.a}
+                """,
+                id="subclass",
+            ),
+            pytest.param(
+                """
+                class FooBaseTrigger(AwsBaseWaiterTrigger):
+                    def serialize(self):
+                        return "x.FooTrigger", {"a": self.a}
+
+                class FooTrigger(FooBaseTrigger):
+                    def __init__(self, a, b):
+                        super().__init__(serialized_fields={"a": a, "b": b})
+                        self.a = a
+                """,
+                id="intermediate-base",
+            ),
+        ],
+    )
+    def test_own_serialize_takes_precedence(self, analyzer_factory, source: str) -> None:
+        """A ``serialize()`` in the chain is checked as before, even if ``serialized_fields`` has more keys."""
+        analyzer = analyzer_factory(
+            "from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger\n"
+            + textwrap.dedent(source),
+        )
+        assert analyzer._get_waiter_serialize_keys(analyzer.classes["FooTrigger"]) is None
+        assert analyzer.get_violations() == [("FooTrigger", ["b"])]
+
+    def test_deprecated_alias_excluded_by_design(self, analyzer_factory, monkeypatch) -> None:
+        """Mirrors ``SageMakerTrigger``: deprecated aliases are folded into the waiter parameters."""
+        analyzer = analyzer_factory(
+            """
+            from airflow.providers.amazon.aws.triggers.base import AwsBaseWaiterTrigger
+
+            class FooTrigger(AwsBaseWaiterTrigger):
+                def __init__(
+                    self, job_name, waiter_delay=30, waiter_max_attempts=60, poke_interval=None, max_attempts=None
+                ):
+                    if poke_interval is not None:
+                        waiter_delay = poke_interval
+                    if max_attempts is not None:
+                        waiter_max_attempts = max_attempts
+                    super().__init__(
+                        serialized_fields={"job_name": job_name},
+                        waiter_delay=waiter_delay,
+                        waiter_max_attempts=waiter_max_attempts,
+                    )
+            """,
+        )
+        assert analyzer.get_violations() == [("FooTrigger", ["max_attempts", "poke_interval"])]
+        monkeypatch.setattr(check_module, "BY_DESIGN_EXCLUSIONS", {"trigger.py::FooTrigger"})
+        assert analyzer.get_violations() == []
