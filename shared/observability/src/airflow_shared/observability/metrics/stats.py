@@ -110,6 +110,11 @@ def initialize(
     _export_legacy_names = export_legacy_names
 
 
+def is_initialized() -> bool:
+    """Return whether :func:`initialize` was called."""
+    return _factory is not None
+
+
 def _get_backend() -> StatsLogger | NoStatsLogger:
     """Return the current backend, creating it on first access."""
     global _backend

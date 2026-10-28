@@ -41,6 +41,7 @@ from airflow_shared.observability.metrics.otel_logger import (
     SafeOtelLogger,
     _generate_key_name,
     _is_up_down_counter,
+    atexit_register_metrics_flush,
     full_name,
     get_otel_logger,
 )
@@ -597,6 +598,42 @@ class TestOtelMetrics:
             f"stdout:\n{proc.stdout}\n"
             f"stderr:\n{proc.stderr}"
         )
+
+    def test_atexit_flush_covers_every_provider(self):
+        """Two loggers in one process, like Airflow's and the Task SDK's stats modules: both are flushed."""
+        function_call_str = (
+            "from airflow_shared.observability.metrics.otel_logger import get_otel_logger; "
+            "first = get_otel_logger(debug=True); "
+            "first.incr('first_logger_stat'); "
+            "second = get_otel_logger(debug=True); "
+            "second.incr('second_logger_stat')"
+        )
+
+        proc = subprocess.run(
+            [sys.executable, "-c", function_call_str],
+            check=False,
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert proc.returncode == 0, f"Process failed\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        assert "first_logger_stat" in proc.stdout
+        assert "second_logger_stat" in proc.stdout
+
+    @mock.patch("atexit.register")
+    def test_atexit_flush_is_skipped_in_a_forked_child(self, mock_register):
+        provider = mock.Mock(spec=SDKMeterProvider)
+        atexit_register_metrics_flush(provider)
+        flush = mock_register.call_args.args[0]
+
+        with mock.patch("os.getpid", return_value=os.getpid() + 1):
+            flush()
+        provider.force_flush.assert_not_called()
+
+        flush()
+        provider.force_flush.assert_called_once_with()
 
     def test_reinit_after_fork_exports_metrics(self):
         """Calling get_otel_logger() twice (simulating post-fork re-init) should still export metrics.

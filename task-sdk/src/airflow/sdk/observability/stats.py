@@ -25,10 +25,13 @@ from airflow.sdk._shared.observability.metrics.stats import (
     gauge,
     incr,
     initialize,
+    is_initialized,
     normalize_name_for_stats,
     timer,
     timing,
 )
+from airflow.sdk.configuration import conf
+from airflow.sdk.observability.metrics import stats_utils
 
 __all__ = [
     "Stats",
@@ -40,3 +43,11 @@ __all__ = [
     "timer",
     "timing",
 ]
+
+# Providers send their metrics through this copy of the stats module, also from the scheduler, API server,
+# triggerer and Dag processor, which only set up Airflow's own copy: without this, they would be dropped there.
+if not is_initialized():
+    initialize(
+        factory=stats_utils.get_stats_factory(),
+        export_legacy_names=conf.getboolean("metrics", "legacy_names_on"),
+    )

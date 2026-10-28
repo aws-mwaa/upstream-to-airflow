@@ -432,13 +432,21 @@ class MetricsMap:
         self.histograms[name].record(value, tags)
 
 
-def flush_otel_metrics():
-    provider = metrics.get_meter_provider()
-    provider.force_flush()
+def atexit_register_metrics_flush(provider: MeterProvider) -> None:
+    """
+    Flush the provider's metrics when the process exits.
 
+    Each provider is flushed, not only the global one: a process can have one per copy of this module
+    (Airflow's and the Task SDK's), and only the last one created is global. A forked child inherits the
+    hook, and must not export its parent's metrics again.
+    """
+    pid = os.getpid()
 
-def atexit_register_metrics_flush():
-    atexit.register(flush_otel_metrics)
+    def flush() -> None:
+        if os.getpid() == pid:
+            provider.force_flush()
+
+    atexit.register(flush)
 
 
 def get_otel_logger(
@@ -473,7 +481,7 @@ def get_otel_logger(
     configured_provider = metrics.get_meter_provider()
     if os.environ.get(OTEL_CONFIG_FILE) and isinstance(configured_provider, MeterProvider):
         log.info("%s is set; using the MeterProvider it built.", OTEL_CONFIG_FILE)
-        atexit_register_metrics_flush()
+        atexit_register_metrics_flush(configured_provider)
         return SafeOtelLogger(
             configured_provider, effective_prefix, validator, stat_name_handler, statsd_influxdb_enabled
         )
@@ -526,23 +534,20 @@ def get_otel_logger(
     except (ImportError, AttributeError):
         pass
 
-    metrics.set_meter_provider(
-        MeterProvider(
-            resource=resource,
-            metric_readers=readers,
-            views=[
-                View(
-                    instrument_type=metrics.Histogram,
-                    aggregation=ExponentialBucketHistogramAggregation(),
-                )
-            ],
-            shutdown_on_exit=False,
-        ),
+    provider = MeterProvider(
+        resource=resource,
+        metric_readers=readers,
+        views=[
+            View(
+                instrument_type=metrics.Histogram,
+                aggregation=ExponentialBucketHistogramAggregation(),
+            )
+        ],
+        shutdown_on_exit=False,
     )
+    metrics.set_meter_provider(provider)
 
     # Register a hook that flushes any in-memory metrics at shutdown.
-    atexit_register_metrics_flush()
+    atexit_register_metrics_flush(provider)
 
-    return SafeOtelLogger(
-        metrics.get_meter_provider(), effective_prefix, validator, stat_name_handler, statsd_influxdb_enabled
-    )
+    return SafeOtelLogger(provider, effective_prefix, validator, stat_name_handler, statsd_influxdb_enabled)

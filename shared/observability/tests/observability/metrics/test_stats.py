@@ -148,6 +148,19 @@ class TestStats:
         # Avoid side-effects
         importlib.reload(airflow_shared.observability.metrics.stats)
 
+    def test_is_initialized(self):
+        importlib.reload(airflow_shared.observability.metrics.stats)
+        stats = airflow_shared.observability.metrics.stats
+        assert not stats.is_initialized()
+
+        stats.initialize(
+            factory=get_statsd_logger_factory(stats_class=statsd.StatsClient), export_legacy_names=True
+        )
+
+        assert stats.is_initialized()
+        # Avoid side-effects
+        importlib.reload(airflow_shared.observability.metrics.stats)
+
     def test_load_custom_statsd_client(self):
         importlib.reload(airflow_shared.observability.metrics.stats)
         stats = airflow_shared.observability.metrics.stats
