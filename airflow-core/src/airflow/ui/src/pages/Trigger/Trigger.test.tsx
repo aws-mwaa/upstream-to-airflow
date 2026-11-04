@@ -48,6 +48,8 @@ const renderAt = (path: string) =>
     </ChakraProvider>,
   );
 
+const scheduled = (dagId: string) => ({ created_at: "2026-10-01T00:00:00Z", dag_id: dagId, updated_at: "" });
+
 // Tests render i18n keys: the msw handlers serve empty translation bundles.
 describe("Trigger details", () => {
   it("shows why a failing trigger fails on its Details tab", async () => {
@@ -91,6 +93,57 @@ describe("Trigger details", () => {
     expect(await screen.findByTestId("trigger-last-error")).toHaveTextContent("ConnectionError");
     expect(screen.getAllByText("states.running").length).toBeGreaterThan(0);
     expect(screen.queryByRole("row", { name: /triggers\.detail\.lastFailedAt/u })).not.toBeInTheDocument();
+  });
+
+  it("lists the Dags scheduled on a watcher's assets, once each", async () => {
+    const watcher = triggers.find(({ id }) => id === 3);
+    const scheduled = (dagId: string) => ({ created_at: "2026-10-01T00:00:00Z", dag_id: dagId, updated_at: "" });
+
+    server.use(
+      http.get("/api/v2/triggers/:triggerId", () =>
+        HttpResponse.json({
+          ...watcher,
+          asset_watchers: [
+            ...(watcher?.asset_watchers ?? []),
+            {
+              asset_id: 2,
+              asset_name: "plain_asset",
+              asset_uri: "s3://bucket/plain",
+              watcher_name: "my_watcher",
+            },
+          ],
+        }),
+      ),
+      http.get("/api/v2/assets/:assetId", ({ params }) =>
+        HttpResponse.json({
+          id: Number(params.assetId),
+          scheduled_dags:
+            params.assetId === "1"
+              ? [scheduled("process_payments"), scheduled("audit_payments")]
+              : [scheduled("process_payments")],
+        }),
+      ),
+    );
+    renderAt("/triggers/3");
+
+    const row = await screen.findByRole("row", {
+      name: /triggers\.detail\.scheduledDags.*process_payments/u,
+    });
+
+    expect(row).toHaveTextContent(/audit_paymentsprocess_payments$/u);
+    expect(screen.getByRole("link", { name: "process_payments" })).toHaveAttribute(
+      "href",
+      "/dags/process_payments",
+    );
+  });
+
+  it("says when a watcher's assets have no Dag the user can read", async () => {
+    renderAt("/triggers/3");
+
+    expect(
+      await screen.findByRole("row", { name: /triggers\.detail\.noReadableScheduledDags/u }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("row", { name: /triggers\.detail\.scheduledDags/u })).toHaveLength(1);
   });
 
   it("explains that a trigger it cannot find has most likely finished", async () => {
