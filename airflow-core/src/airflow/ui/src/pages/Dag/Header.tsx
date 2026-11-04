@@ -46,6 +46,7 @@ import { DagOwners } from "../DagsList/DagOwners";
 import { DagTags } from "../DagsList/DagTags";
 import { Schedule } from "../DagsList/Schedule";
 import { DeadlineAlertsBadge } from "./DeadlineAlertsBadge";
+import { FailingWatchersBadge } from "./FailingWatchersBadge";
 
 type LatestRunInfo = {
   dag_id: string;
@@ -185,7 +186,12 @@ export const Header = ({
       }
       icon={<DagIcon />}
       stats={stats}
-      statusBadge={<BackfillInProgressBadge dagId={dagId ?? ""} />}
+      statusBadge={
+        <>
+          <BackfillInProgressBadge dagId={dagId ?? ""} />
+          {dag?.asset_expression ? <FailingWatchersBadge dagId={dag.dag_id} /> : undefined}
+        </>
+      }
       title={dag?.dag_display_name ?? dagId}
       type="dag"
     />

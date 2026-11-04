@@ -17,12 +17,14 @@
  * under the License.
  */
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import type { DAGDetailsResponse } from "openapi-gen/requests/types.gen";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import i18n from "src/i18n/config";
 import { MOCK_DAG } from "src/mocks/handlers/dag";
+import { server } from "src/mocks/server";
 import { Wrapper } from "src/utils/Wrapper";
 
 import { Header } from "./Header";
@@ -69,6 +71,37 @@ describe("Header", () => {
 
     expect(screen.queryByText(i18n.t("dag:dagDetails.nextRun"))).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reparse Dag" })).not.toBeInTheDocument();
+  });
+
+  it("looks for failing watchers only for a Dag scheduled on assets", async () => {
+    const requested: Array<Array<string>> = [];
+
+    server.use(
+      http.get("/api/v2/triggers", ({ request }) => {
+        requested.push(new URL(request.url).searchParams.getAll("kind"));
+
+        return HttpResponse.json({ total_entries: 0, triggers: [] });
+      }),
+      // The schedule stat of an asset-scheduled Dag.
+      http.get("/ui/next_run_assets/:dagId", () => HttpResponse.json({ asset_expression: {}, events: [] })),
+      http.get("/api/v2/dags/:dagId/assets/queuedEvents", () =>
+        HttpResponse.json({ queued_events: [], total_entries: 0 }),
+      ),
+    );
+    const { unmount } = render(
+      <Wrapper>
+        <Header dag={mockDag} />
+      </Wrapper>,
+    );
+
+    unmount();
+    render(
+      <Wrapper>
+        <Header dag={{ ...mockDag, asset_expression: { any: [] } }} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => expect(requested).toEqual([["asset_watcher"]]));
   });
 
   it("does not render next run timestamp for a paused Dag", () => {
