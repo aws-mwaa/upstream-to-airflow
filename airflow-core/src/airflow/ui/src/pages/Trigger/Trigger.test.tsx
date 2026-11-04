@@ -80,7 +80,7 @@ describe("Trigger details", () => {
     expect(screen.queryByTestId("trigger-last-error")).not.toBeInTheDocument();
   });
 
-  it("keeps the last error of a recovered trigger, muted, without its failure times", async () => {
+  it("keeps the last error of a recovered trigger, muted, with when it last failed", async () => {
     const failing = triggers.find(({ id }) => id === 3);
 
     server.use(
@@ -92,12 +92,14 @@ describe("Trigger details", () => {
 
     expect(await screen.findByTestId("trigger-last-error")).toHaveTextContent("ConnectionError");
     expect(screen.getAllByText("states.running").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("row", { name: /triggers\.detail\.lastFailedAt/u })).not.toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /triggers\.detail\.lastFailedAt/u })).toHaveTextContent(
+      "2026-10-01",
+    );
+    expect(screen.queryByRole("row", { name: /triggers\.detail\.firstFailedAt/u })).not.toBeInTheDocument();
   });
 
   it("lists the Dags scheduled on a watcher's assets, once each", async () => {
     const watcher = triggers.find(({ id }) => id === 3);
-    const scheduled = (dagId: string) => ({ created_at: "2026-10-01T00:00:00Z", dag_id: dagId, updated_at: "" });
 
     server.use(
       http.get("/api/v2/triggers/:triggerId", () =>
