@@ -96,6 +96,16 @@ const createColumns = (
     header: translate("triggers.columns.owner"),
     id: "owner",
   },
+  {
+    // A Dag scheduled on two of the assets a shared trigger watches counts once.
+    cell: ({ row: { original } }: TriggerRow) =>
+      original.kind === "asset_watcher"
+        ? new Set(original.asset_watchers.flatMap((watcher) => watcher.scheduled_dag_ids)).size
+        : "-",
+    enableSorting: false,
+    header: translate("triggers.columns.dagsAffected"),
+    id: "dags_affected",
+  },
   ...(multiTeam
     ? [
         {

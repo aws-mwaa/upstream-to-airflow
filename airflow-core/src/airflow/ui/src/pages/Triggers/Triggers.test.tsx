@@ -19,7 +19,7 @@
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -98,6 +98,39 @@ describe("Triggers list", () => {
     ]);
     expect(screen.getByText("MessageQueueTrigger")).toBeInTheDocument();
     expect(screen.getByTitle("ConnectionError: broker.example.com:9092 is unreachable")).toBeInTheDocument();
+  });
+
+  it("counts each Dag a watcher's trigger runs once, and no Dags for other kinds", async () => {
+    const watcher = triggers.find(({ id }) => id === 3);
+    const shared = {
+      ...watcher,
+      asset_watchers: [
+        ...(watcher?.asset_watchers ?? []),
+        {
+          asset_id: 2,
+          asset_name: "plain_asset",
+          asset_uri: "s3://bucket/plain",
+          scheduled_dag_ids: ["consumer_dag", "report_dag"],
+          watcher_name: "my_watcher",
+        },
+      ],
+    };
+
+    server.use(
+      http.get("/api/v2/triggers", () =>
+        HttpResponse.json({ total_entries: 2, triggers: [triggers[0], shared] }),
+      ),
+    );
+    renderAt("/triggers");
+
+    const watcherRow = await screen.findByRole("row", { name: /^3\b/u }, { timeout: 5000 });
+    const taskRow = screen.getByRole("row", { name: /^1\b/u });
+    const column = screen
+      .getAllByRole("columnheader")
+      .findIndex((header) => header.textContent === "triggers.columns.dagsAffected");
+
+    expect(within(watcherRow).getAllByRole("cell")[column]).toHaveTextContent(/^2$/u);
+    expect(within(taskRow).getAllByRole("cell")[column]).toHaveTextContent(/^-$/u);
   });
 
   it("sends the kind and status filters in the URL to the API", async () => {

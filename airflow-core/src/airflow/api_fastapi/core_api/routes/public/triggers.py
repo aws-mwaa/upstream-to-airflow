@@ -16,6 +16,7 @@
 # under the License.
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, HTTPException, Query, status
@@ -34,8 +35,10 @@ from airflow.api_fastapi.common.parameters.trigger import (
     QueryTriggerDagIdFilter,
     QueryTriggererHostnameFilter,
     QueryTriggerKindFilter,
+    QueryTriggerScheduledDagIdFilter,
     QueryTriggerStatusFilter,
     QueryTriggerTeamsFilter,
+    select_scheduled_dag_ids,
 )
 from airflow.api_fastapi.common.router import AirflowRouter
 from airflow.api_fastapi.common.types import Mimetype
@@ -54,6 +57,7 @@ from airflow.api_fastapi.core_api.routes.public.log import (
 )
 from airflow.api_fastapi.core_api.security import (
     GetUserDep,
+    PermittedTriggerFilter,
     ReadableTriggersFilterDep,
     requires_access_trigger,
 )
@@ -121,6 +125,21 @@ def _get_callback_dag_run_ids(triggers: Iterable[Trigger], *, session: Session) 
     return {callback_id: run_id for callback_id, run_id in rows}
 
 
+def _get_scheduled_dag_ids(
+    triggers: Iterable[Trigger], *, readable: PermittedTriggerFilter, session: Session
+) -> dict[int, list[str]]:
+    """Return the readable Dags scheduled on each readable asset the triggers watch; one query for them all."""
+    asset_ids = {w.asset_id for trigger in triggers for w in trigger.asset_watchers} & readable.asset_ids
+    if not asset_ids or not (readable_dag_ids := readable.dag_ids):
+        return {}
+    scheduled: dict[int, set[str]] = defaultdict(set)
+    for asset_id, dag_id in session.execute(
+        select_scheduled_dag_ids(asset_ids=asset_ids, dag_ids=readable_dag_ids)
+    ):
+        scheduled[asset_id].add(dag_id)
+    return {asset_id: sorted(dag_ids) for asset_id, dag_ids in scheduled.items()}
+
+
 def _get_public_map_indexes(triggers: Iterable[Trigger], *, session: Session) -> dict[UUID, int]:
     """Return the public map index of each trigger's task instance; one query for those in a dynamic region."""
     task_instances = [trigger.task_instance for trigger in triggers if trigger.task_instance is not None]
@@ -141,6 +160,7 @@ def _build_response(
     readable_asset_ids: set[int],
     callback_dag_run_ids: dict[UUID, str],
     public_map_indexes: dict[UUID, int],
+    scheduled_dag_ids: dict[int, list[str]],
 ) -> TriggerDetailResponse | None:
     """
     Describe a trigger and its owner, the same way for every kind; ``None`` if the owner just let go.
@@ -195,6 +215,7 @@ def _build_response(
                 asset_name=watcher.asset.name,
                 asset_uri=watcher.asset.uri,
                 watcher_name=watcher.name,
+                scheduled_dag_ids=scheduled_dag_ids.get(watcher.asset_id, []),
             )
             for watcher in sorted(trigger.asset_watchers, key=lambda w: (w.asset_id, w.name))
             if watcher.asset_id in readable_asset_ids
@@ -234,6 +255,7 @@ def get_triggers(
     triggerer_hostname: QueryTriggererHostnameFilter,
     dag_id: QueryTriggerDagIdFilter,
     asset_id: QueryTriggerAssetIdFilter,
+    scheduled_dag_id: QueryTriggerScheduledDagIdFilter,
     teams: QueryTriggerTeamsFilter,
     readable_triggers_filter: ReadableTriggersFilterDep,
     session: SessionDep,
@@ -255,6 +277,7 @@ def get_triggers(
             triggerer_hostname,
             dag_id,
             asset_id,
+            scheduled_dag_id,
             teams,
             readable_triggers_filter,
         ],
@@ -266,12 +289,14 @@ def get_triggers(
     triggers = session.scalars(triggers_select).unique().all()
     callback_dag_run_ids = _get_callback_dag_run_ids(triggers, session=session)
     public_map_indexes = _get_public_map_indexes(triggers, session=session)
+    scheduled_dag_ids = _get_scheduled_dag_ids(triggers, readable=readable_triggers_filter, session=session)
     responses = (
         _build_response(
             trigger,
             readable_asset_ids=readable_triggers_filter.asset_ids,
             callback_dag_run_ids=callback_dag_run_ids,
             public_map_indexes=public_map_indexes,
+            scheduled_dag_ids=scheduled_dag_ids,
         )
         for trigger in triggers
     )
@@ -303,6 +328,9 @@ def get_trigger(
             readable_asset_ids=readable_triggers_filter.asset_ids,
             callback_dag_run_ids=_get_callback_dag_run_ids([trigger], session=session),
             public_map_indexes=_get_public_map_indexes([trigger], session=session),
+            scheduled_dag_ids=_get_scheduled_dag_ids(
+                [trigger], readable=readable_triggers_filter, session=session
+            ),
         )
     )
     if response is None:
