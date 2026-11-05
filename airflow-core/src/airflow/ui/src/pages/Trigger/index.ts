@@ -17,5 +17,6 @@
  * under the License.
  */
 export { Details } from "./Details";
+export { Logs } from "./Logs";
 export { Owner } from "./Owner";
 export { Trigger } from "./Trigger";
