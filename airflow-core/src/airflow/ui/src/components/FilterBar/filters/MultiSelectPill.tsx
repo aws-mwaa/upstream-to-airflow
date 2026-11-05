@@ -72,6 +72,9 @@ export const MultiSelectPill = ({
   const showAdvancedToggle = filter.config.supportsAdvancedSearch === true;
   const isAdvanced = showAdvancedToggle && advanced.enabled;
   const selectRef = useRef<SelectInstance<SelectOption, true> | null>(null);
+  // Options whose label differs from their value (an enum shown translated) read by label; async
+  // options that are not loaded right now fall back to the raw value.
+  const getLabel = (value: string) => options.find((option) => option.value === value)?.label ?? value;
 
   // The editor only mounts when editing begins, so the caret belongs in the select from the
   // start. This runs a frame late on purpose: FilterPill focuses its wrapper on the same tick,
@@ -94,7 +97,7 @@ export const MultiSelectPill = ({
               {`(${mode})`}
             </Box>
           ) : undefined}
-          {values.map((value) => value).join(", ")}
+          {values.map(getLabel).join(", ")}
         </HStack>
       }
       filter={filter}
@@ -183,7 +186,7 @@ export const MultiSelectPill = ({
               // menuPortal is a react-select style, not a chakraStyles one; the portalled menu
               // needs to clear the sticky table header.
               styles={{ menuPortal: (base) => ({ ...base, zIndex: 1500 }) }}
-              value={values.map((value) => ({ label: value, value }))}
+              value={values.map((value) => ({ label: getLabel(value), value }))}
             />
           </Box>
           {showAdvancedToggle ? (
