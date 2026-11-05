@@ -17,12 +17,22 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import AliasPath, AwareDatetime, Field, NonNegativeInt, field_validator, model_validator
+from pydantic import (
+    AliasPath,
+    AwareDatetime,
+    Field,
+    NonNegativeInt,
+    PositiveInt,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from airflow._shared.timezones import timezone
 from airflow.api_fastapi.core_api.base import BaseModel, StrictBaseModel
@@ -224,6 +234,65 @@ class DAGRunCollectionResponse(BaseModel):
     )
 
 
+_OverrideName = Annotated[str, StringConstraints(min_length=1, max_length=256)]
+MAX_OVERRIDE_ENTRIES = 50
+MAX_OVERRIDE_POOLS = 5
+MAX_OVERRIDE_BYTES = 8192
+
+
+class TaskSchedulingOverride(StrictBaseModel):
+    """Scheduling values for a task, or every task of a TaskGroup, in one run."""
+
+    pool: _OverrideName | None = None
+    pool_slots: PositiveInt | None = None
+    priority_weight: int | None = None
+    queue: _OverrideName | None = None
+
+    @model_validator(mode="after")
+    def _check_not_empty(self) -> TaskSchedulingOverride:
+        if not self.model_dump(exclude_none=True):
+            raise ValueError("an override entry must set at least one field")
+        return self
+
+
+class DagRunSchedulingOverrides(StrictBaseModel):
+    """
+    Per-run scheduling overrides.
+
+    Setting any requires permission to edit the Dag. Pools must have ``allow_overrides`` set and
+    queues must be listed in ``[core] override_target_queues``.
+    """
+
+    tasks: dict[str, TaskSchedulingOverride] = Field(
+        default_factory=dict,
+        description="Keyed by task ID or TaskGroup ID. A group entry applies to every task in the group, "
+        "nested groups included; a task entry wins over a group entry.",
+    )
+    pools: dict[_OverrideName, _OverrideName] = Field(
+        default_factory=dict,
+        description="Moves every task of the run whose pool would otherwise be the key.",
+    )
+
+    @model_validator(mode="after")
+    def _check_limits(self) -> DagRunSchedulingOverrides:
+        if len(self.tasks) + len(self.pools) > MAX_OVERRIDE_ENTRIES:
+            raise ValueError(f"overrides can have at most {MAX_OVERRIDE_ENTRIES} entries")
+        pools = {entry.pool for entry in self.tasks.values() if entry.pool} | set(self.pools.values())
+        if len(pools) > MAX_OVERRIDE_POOLS:
+            raise ValueError(f"overrides can name at most {MAX_OVERRIDE_POOLS} distinct pools")
+        if len(json.dumps(self.to_stored())) > MAX_OVERRIDE_BYTES:
+            raise ValueError(f"overrides can be at most {MAX_OVERRIDE_BYTES} bytes")
+        return self
+
+    def to_stored(self) -> dict[str, Any]:
+        stored: dict[str, Any] = {}
+        if self.tasks:
+            stored["tasks"] = {key: entry.model_dump(exclude_none=True) for key, entry in self.tasks.items()}
+        if self.pools:
+            stored["pools"] = dict(self.pools)
+        return stored
+
+
 class TriggerDAGRunPostBody(StrictBaseModel):
     """Trigger Dag Run Serializer for POST body."""
 
@@ -243,6 +312,12 @@ class TriggerDAGRunPostBody(StrictBaseModel):
         "runs can start or resume except those held by paused backfills. No scheduled runs are created, "
         "and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining "
         "to complete. Requires the same permission as pausing the Dag.",
+    )
+    overrides: DagRunSchedulingOverrides | None = Field(
+        default=None,
+        description="Pool, pool slots, priority weight or queue for named tasks or TaskGroups of this run "
+        "only. Requires permission to edit the Dag, and only pools and queues an administrator nominated "
+        "can be used.",
     )
 
     @field_validator("conf")

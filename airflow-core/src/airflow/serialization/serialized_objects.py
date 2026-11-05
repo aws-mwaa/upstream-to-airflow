@@ -85,6 +85,7 @@ from airflow.serialization.definitions.assets import (
 from airflow.serialization.definitions.baseoperator import SerializedBaseOperator
 from airflow.serialization.definitions.dag import SerializedDAG
 from airflow.serialization.definitions.deadline import SerializedDeadlineAlert
+from airflow.serialization.definitions.lookup import LOOKUP_FIELDS, decode_lookup
 from airflow.serialization.definitions.node import DAGNode
 from airflow.serialization.definitions.operatorlink import XComOperatorLink
 from airflow.serialization.definitions.param import SerializedParam, SerializedParamsDict
@@ -1086,6 +1087,11 @@ class OperatorSerialization(DAGNode, BaseSerialization):
         if op.start_trigger_args:
             serialize_op["start_trigger_args"] = _encode_start_trigger_args(op.start_trigger_args)
 
+        if scheduling_lookups := getattr(op, "scheduling_lookups", None):
+            serialize_op["scheduling_lookups"] = {
+                field: lookup.serialize() for field, lookup in scheduling_lookups.items()
+            }
+
         if op.operator_extra_links:
             serialize_op["_operator_extra_links"] = cls._serialize_operator_extra_links(
                 op.operator_extra_links.__get__(op)
@@ -1197,9 +1203,9 @@ class OperatorSerialization(DAGNode, BaseSerialization):
                     raise RuntimeError("_is_sensor=False should never have been serialized!")
                 object.__setattr__(op, "deps", op.deps | {ReadyToRescheduleDep()})
                 continue
-            elif k in ("is_stub", "_arg_bindings"):
-                # Both are restored unconditionally below: is_stub must fail closed rather than go
-                # through generic decoding, and _arg_bindings is plain JSON, not {__type, __var}.
+            elif k in ("is_stub", "_arg_bindings", "scheduling_lookups"):
+                # Restored below: is_stub must fail closed rather than go through generic decoding,
+                # and _arg_bindings and scheduling_lookups are plain JSON, not {__type, __var}.
                 continue
             elif (
                 k in cls._decorated_fields
@@ -1263,6 +1269,16 @@ class OperatorSerialization(DAGNode, BaseSerialization):
         # on this path, so anything that is not JSON ``true`` means "not a stub".
         setattr(op, "is_stub", encoded_op.get("is_stub") is True)
         setattr(op, "_arg_bindings", encoded_op.get("_arg_bindings"))
+        if (encoded_lookups := encoded_op.get("scheduling_lookups")) and not op.is_mapped:
+            setattr(
+                op,
+                "scheduling_lookups",
+                {
+                    field: decode_lookup(encoded)
+                    for field, encoded in encoded_lookups.items()
+                    if field in LOOKUP_FIELDS
+                },
+            )
 
         start_trigger_args = None
         encoded_start_trigger_args = encoded_op.get("start_trigger_args", None)

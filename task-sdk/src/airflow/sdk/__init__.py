@@ -66,6 +66,7 @@ __all__ = [
     "IdentityMapper",
     "Label",
     "LoopDecision",
+    "Lookup",
     "Metadata",
     "MinimumCount",
     "MonthWindow",
@@ -176,6 +177,7 @@ if TYPE_CHECKING:
     from airflow.sdk.definitions.decorators import result, setup, task, teardown
     from airflow.sdk.definitions.decorators.task_group import task_group
     from airflow.sdk.definitions.edges import EdgeModifier, Label
+    from airflow.sdk.definitions.lookup import Lookup
     from airflow.sdk.definitions.loop import LoopDecision
     from airflow.sdk.definitions.param import Param, ParamsDict
     from airflow.sdk.definitions.partition_mappers.allowed_key import AllowedKeyMapper
@@ -297,6 +299,7 @@ __lazy_imports: dict[str, tuple[str, str]] = {
     "IdentityMapper": (".definitions.partition_mappers.identity", "IdentityMapper"),
     "Label": (".definitions.edges", "Label"),
     "LoopDecision": (".definitions.loop", "LoopDecision"),
+    "Lookup": (".definitions.lookup", "Lookup"),
     "Metadata": (".definitions.asset.metadata", "Metadata"),
     "MinimumCount": (".definitions.partition_mappers.wait_policy", "MinimumCount"),
     "MonthWindow": (".definitions.partition_mappers.window", "MonthWindow"),

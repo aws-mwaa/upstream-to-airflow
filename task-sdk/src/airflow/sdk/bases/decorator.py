@@ -49,6 +49,7 @@ from airflow.sdk.definitions._internal.loop import LoopTaskGroup, check_dag_resu
 from airflow.sdk.definitions._internal.types import NOTSET
 from airflow.sdk.definitions.asset import Asset
 from airflow.sdk.definitions.context import KNOWN_CONTEXT_KEYS
+from airflow.sdk.definitions.lookup import LOOKUP_FIELDS, Lookup, reject_lookups_in_partial
 from airflow.sdk.definitions.mappedoperator import (
     MappedOperator,
     ensure_xcomarg_return_value,
@@ -554,6 +555,8 @@ class _TaskDecorator(ExpandableFactory, Generic[FParams, FReturn, OperatorSubcla
         for arg_name, expected_type in BASEOPERATOR_ARGS_EXPECTED_TYPES.items():
             if arg_name in self.kwargs:
                 value = self.kwargs[arg_name]
+                if isinstance(value, Lookup) and arg_name in LOOKUP_FIELDS:
+                    continue
                 if value is not None and not isinstance(value, expected_type):
                     raise TypeError(
                         f"Expected {arg_name!r} to be {expected_type}, got {type(value).__name__}: {value!r}"
@@ -683,6 +686,7 @@ class _TaskDecorator(ExpandableFactory, Generic[FParams, FReturn, OperatorSubcla
             partial_kwargs["depends_on_past"] = True
         start_date = timezone.convert_to_utc(partial_kwargs.pop("start_date", None))
         end_date = timezone.convert_to_utc(partial_kwargs.pop("end_date", None))
+        reject_lookups_in_partial(partial_kwargs, task_id)
         if "pool_slots" in partial_kwargs:
             if partial_kwargs["pool_slots"] < 1:
                 dag_str = ""

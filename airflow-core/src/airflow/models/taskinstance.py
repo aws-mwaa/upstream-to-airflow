@@ -1391,7 +1391,7 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
         )
         context_carrier = new_task_run_carrier(dag_run.context_carrier)
 
-        return {
+        mapping = {
             "dag_id": task.dag_id,
             "task_id": task.task_id,
             "run_id": run_id,
@@ -1415,6 +1415,8 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
             "dag_version_id": dag_version_id,
             "context_carrier": context_carrier,
         }
+        mapping.update(dag_run.get_scheduling_values(task))
+        return mapping
 
     @reconstructor
     def init_on_load(self) -> None:
@@ -1586,8 +1588,9 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
 
         :param task: The task object to copy from
         :param pool_override: Use the pool_override instead of task's pool
-        :param dag_run: the DagRun this task instance belongs to, forwarded to the mutation hook so a
-            cluster policy can route on ``dag_run.conf``; ``None`` when no run is available yet
+        :param dag_run: the DagRun this task instance belongs to. Its per-run scheduling values are
+            applied, and it is forwarded to the mutation hook so a cluster policy can route on
+            ``dag_run.conf``; ``None`` when no run is available yet
         """
         self.task = task
         self.queue = task.queue
@@ -1606,8 +1609,23 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
         op_name = getattr(task, "operator_name", None)
         self.custom_operator_name = op_name if isinstance(op_name, str) else ""
         self.is_stub = task.is_stub
+        if dag_run is not None:
+            self.apply_run_scheduling_values(task, dag_run, keep_pool=bool(pool_override))
         # Re-apply cluster policy here so that task default do not overload previous data
         task_instance_mutation_hook(self, dag_run=dag_run)
+
+    def apply_run_scheduling_values(
+        self, task: Operator, dag_run: DagRun, *, keep_pool: bool = False
+    ) -> None:
+        """
+        Set the run's Lookup and override values (AIP-117); the cluster policy is applied after this.
+
+        :param keep_pool: leave ``pool`` alone, because an explicit ``pool_override`` was given.
+        """
+        for field, value in dag_run.get_scheduling_values(task).items():
+            if field == "pool" and keep_pool:
+                continue
+            setattr(self, field, value)
 
     @property
     def key(self) -> TaskInstanceKey:

@@ -42,6 +42,7 @@ from airflow.models import DagModel, DagRun, DagTag, Log
 from airflow.models.asset import AssetEvent, AssetModel
 from airflow.models.dagbundle import DagBundleModel
 from airflow.models.dynamic_region import DynamicRegion
+from airflow.models.pool import Pool
 from airflow.models.taskinstance import TaskInstance
 from airflow.models.team import Team
 from airflow.models.xcom import XComModel
@@ -63,6 +64,7 @@ from tests_common.test_utils.db import (
     clear_db_connections,
     clear_db_dags,
     clear_db_logs,
+    clear_db_pools,
     clear_db_runs,
     clear_db_serialized_dags,
 )
@@ -4088,6 +4090,74 @@ class TestTriggerDagRun:
         assert response.status_code == 409
         session.expire_all()
         assert session.get(DagModel, DAG1_ID).scheduling_state == DagSchedulingState.PAUSED
+
+    @pytest.fixture
+    def override_pools(self, session):
+        session.add(Pool(pool="heavy", slots=4, include_deferred=False, allow_overrides=True))
+        session.add(Pool(pool="closed", slots=4, include_deferred=False, allow_overrides=False))
+        session.commit()
+        yield
+        clear_db_pools()
+
+    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle", "override_pools")
+    def test_trigger_with_overrides(self, test_client, session):
+        response = test_client.post(
+            f"/dags/{DAG1_ID}/dagRuns",
+            json={
+                "logical_date": None,
+                "overrides": {"tasks": {"task_1": {"pool": "heavy", "pool_slots": 2}}},
+            },
+        )
+
+        assert response.status_code == 200
+        run_id = response.json()["dag_run_id"]
+        pools = dict(
+            session.execute(
+                select(TaskInstance.task_id, TaskInstance.pool).where(TaskInstance.run_id == run_id)
+            ).all()
+        )
+        assert pools == {"task_1": "heavy", "task_2": "default_pool"}
+
+    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle", "override_pools")
+    def test_overrides_require_dag_edit_access(self, test_client, session, deny_dag_edit_access):
+        count_dag_runs = select(func.count()).select_from(DagRun).where(DagRun.dag_id == DAG1_ID)
+        dag_runs_before = session.scalar(count_dag_runs)
+
+        response = test_client.post(
+            f"/dags/{DAG1_ID}/dagRuns",
+            json={"logical_date": None, "overrides": {"tasks": {"task_1": {"pool": "heavy"}}}},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == f"Overrides requires permission to edit Dag: {DAG1_ID}"
+        assert session.scalar(count_dag_runs) == dag_runs_before
+
+    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle", "override_pools")
+    @pytest.mark.parametrize("pool", ["closed", "nowhere"])
+    def test_overrides_to_unusable_pool_get_one_error(self, test_client, pool):
+        response = test_client.post(
+            f"/dags/{DAG1_ID}/dagRuns",
+            json={"logical_date": None, "overrides": {"tasks": {"task_1": {"pool": pool}}}},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == f"pool={pool!r} cannot be used for task 'task_1' in this run"
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            pytest.param({"tasks": {"task_1": {}}}, id="empty-entry"),
+            pytest.param({"tasks": {"task_1": {"pool_slots": 0}}}, id="zero-slots"),
+            pytest.param({"pools": {f"p{i}": f"t{i}" for i in range(6)}}, id="too-many-pools"),
+            pytest.param({"tasks": {"task_1": {"executor": "x"}}}, id="unknown-field"),
+        ],
+    )
+    def test_invalid_overrides_body(self, test_client, overrides):
+        response = test_client.post(
+            f"/dags/{DAG1_ID}/dagRuns", json={"logical_date": None, "overrides": overrides}
+        )
+
+        assert response.status_code == 422
 
     @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")
     def test_should_respond_200_with_null_logical_date(self, test_client):

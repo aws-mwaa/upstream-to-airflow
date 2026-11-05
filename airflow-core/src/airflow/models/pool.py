@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, func, select
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import expression
 
 from airflow._shared.observability.metrics.stats import normalize_name_for_stats
 from airflow.exceptions import AirflowException, PoolNotFound
@@ -83,6 +84,10 @@ class Pool(Base):
     slots: Mapped[int] = mapped_column(Integer, default=0)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     include_deferred: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # AIP-117: anyone who can edit a Dag may send that Dag's tasks here for one run.
+    allow_overrides: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=expression.false()
+    )
     team_name: Mapped[str | None] = mapped_column(
         String(50), ForeignKey("team.name", ondelete="SET NULL"), nullable=True
     )
@@ -266,6 +271,7 @@ class Pool(Base):
             "slots": self.slots,
             "description": self.description,
             "include_deferred": self.include_deferred,
+            "allow_overrides": self.allow_overrides,
             "team": self.team_name,
         }
 

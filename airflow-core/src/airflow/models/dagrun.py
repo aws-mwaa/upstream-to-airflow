@@ -35,6 +35,7 @@ from opentelemetry.trace import StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from sqlalchemy import (
     JSON,
+    Boolean,
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
@@ -65,6 +66,7 @@ from sqlalchemy.orm import (
     joinedload,
     lazyload,
     mapped_column,
+    object_session,
     relationship,
     synonym,
     validates,
@@ -85,7 +87,7 @@ from airflow._shared.observability.traces import (
 from airflow._shared.timezones import timezone
 from airflow.callbacks.callback_requests import DagCallbackRequest, DagRunContext
 from airflow.configuration import conf as airflow_conf
-from airflow.exceptions import AirflowException, NotMapped, TaskNotFound
+from airflow.exceptions import AirflowException, NotMapped, ParamValidationError, TaskNotFound
 from airflow.listeners.listener import get_listener_manager
 from airflow.models import Deadline, Log
 from airflow.models.backfill import Backfill
@@ -133,6 +135,7 @@ if TYPE_CHECKING:
         TaskInstance as TIDataModel,
     )
     from airflow.models.dag_version import DagVersion
+    from airflow.models.run_scheduling import RunSchedulingResolver
     from airflow.models.task_coordinates import SchedulingTI
     from airflow.sdk import DAG as SDKDAG
     from airflow.serialization.definitions.dag import SerializedDAG
@@ -337,6 +340,12 @@ class DagRun(Base, LoggingMixin):
     conf: Mapped[dict[str, Any] | None] = mapped_column(
         JSON().with_variant(postgresql.JSONB, "postgresql"), nullable=True
     )
+    # AIP-117 trigger-time overrides. Deferred so that the task instance query, which loads each
+    # task instance's run, never reads it; has_scheduling_overrides says when to load it.
+    scheduling_overrides: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(postgresql.JSONB, "postgresql"), nullable=True, deferred=True
+    )
+    has_scheduling_overrides: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # These two must be either both NULL or both datetime.
     data_interval_start: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
     data_interval_end: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
@@ -487,6 +496,9 @@ class DagRun(Base, LoggingMixin):
     # as an alternative to traversing all current and historical attempts. Maps version_id -> DagVersion.
     _prefetched_dag_version_ids: dict[UUID, DagVersion] | None = None
 
+    # Not persisted: one resolver per serialized Dag, reused for every task instance written.
+    _scheduling_resolvers: dict[int, RunSchedulingResolver] | None = None
+
     def __init__(
         self,
         dag_id: str | None = None,
@@ -508,10 +520,14 @@ class DagRun(Base, LoggingMixin):
         partition_key: str | None = None,
         partition_date: datetime | None = None,
         note: str | None = None,
+        scheduling_overrides: dict[str, Any] | None = None,
     ):
         # For manual runs where logical_date is None, ensure no data_interval is set.
         if logical_date is None and data_interval is not None:
             raise ValueError("data_interval must be None if logical_date is None")
+        if scheduling_overrides:
+            self.scheduling_overrides = scheduling_overrides
+            self.has_scheduling_overrides = True
 
         if data_interval is None:
             # Legacy: Only happen for runs created prior to Airflow 2.2.
@@ -1210,6 +1226,31 @@ class DagRun(Base, LoggingMixin):
             else TI.region_id == region_id
         )
         return session.scalars(query).one_or_none()
+
+    def get_scheduling_values(self, task: Operator) -> dict[str, Any]:
+        """Return the task's pool, pool_slots, priority_weight and queue in this run, where they differ."""
+        if not getattr(task, "scheduling_lookups", None) and not self.has_scheduling_overrides:
+            return {}
+        if self._scheduling_resolvers is None:
+            self._scheduling_resolvers = {}
+        if (dag := task.dag) is None:
+            return {}
+        if (resolver := self._scheduling_resolvers.get(id(dag))) is None:
+            resolver = self._scheduling_resolvers[id(dag)] = self._build_scheduling_resolver(dag)
+        return resolver.get_values(task)
+
+    def _build_scheduling_resolver(self, dag: SerializedDAG) -> RunSchedulingResolver:
+        from airflow.models.run_scheduling import RunSchedulingResolver
+
+        try:
+            params: dict[str, Any] | None = dag.params.deep_merge(self.conf).validate()
+        except (ParamValidationError, ValueError):
+            params = None
+        session = object_session(self)
+        overrides = self.scheduling_overrides if self.has_scheduling_overrides and session else None
+        return RunSchedulingResolver(
+            dag=dag, run_type=self.run_type, params=params, overrides=overrides, session=session
+        )
 
     def get_dag(self) -> SerializedDAG:
         """
@@ -2483,6 +2524,7 @@ class DagRun(Base, LoggingMixin):
                         region_id=region_id,
                         dag_version_id=dag_version_id,
                     )
+                    ti.apply_run_scheduling_values(task, self)
                     ti_mutation_hook(ti, dag_run=self)
                     if ti.operator:
                         created_counts[ti.operator] += 1

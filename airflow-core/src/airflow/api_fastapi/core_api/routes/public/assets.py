@@ -76,6 +76,7 @@ from airflow.api_fastapi.core_api.security import (
     ReadableAssetEventsFilterDep,
     ReadableAssetsFilterDep,
     ReadableDagsFilterDep,
+    check_dag_edit_access,
     requires_access_asset,
     requires_access_asset_alias,
     requires_access_dag,
@@ -609,15 +610,12 @@ def materialize_asset(
             )
 
         params = body.validate_context(context_dag)
+        scheduling_overrides = body.overrides.to_stored() if body.overrides else None
         if body.drain_dag:
-            if not get_auth_manager().is_authorized_dag(
-                method="PUT",
-                details=DagDetails(id=dag_id, team_name=DagModel.get_team_name(dag_id, session=session)),
-                user=user,
-            ):
-                raise HTTPException(
-                    status.HTTP_403_FORBIDDEN, f"Draining requires permission to edit Dag: {dag_id}"
-                )
+            check_dag_edit_access(dag_id, "Draining", user=user, session=session)
+        if scheduling_overrides:
+            check_dag_edit_access(dag_id, "Overrides", user=user, session=session)
+        if body.drain_dag:
             DagModel.start_drain(dag_id, session=session)
         return dag.create_dagrun(
             run_id=params["run_id"],
@@ -635,6 +633,7 @@ def materialize_asset(
             session=session,
             bundle_version=body.bundle_version,
             dag_version=preloaded_dag_version,
+            scheduling_overrides=scheduling_overrides or None,
         )
     except (ParamValidationError, ValueError) as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e

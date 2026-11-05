@@ -50,7 +50,9 @@ from airflow.models.asset import (
 from airflow.models.base import ID_LEN
 from airflow.models.dagbundle import DagBundleModel
 from airflow.models.dagrun import DagRun
+from airflow.models.pool import Pool
 from airflow.models.serialized_dag import SerializedDagModel
+from airflow.models.taskinstance import TaskInstance
 from airflow.models.team import Team
 from airflow.models.trigger import Trigger
 from airflow.providers.standard.operators.empty import EmptyOperator
@@ -69,6 +71,7 @@ from tests_common.test_utils.db import (
     clear_db_dag_bundles,
     clear_db_dags,
     clear_db_logs,
+    clear_db_pools,
     clear_db_runs,
     clear_db_teams,
 )
@@ -3059,6 +3062,35 @@ class TestPostAssetMaterialize(TestAssets):
             )
         else:
             assert session.scalar(select(func.count()).select_from(DagRun)) == 1
+
+    @pytest.fixture
+    def heavy_pool(self, session):
+        session.add(Pool(pool="heavy", slots=4, include_deferred=False, allow_overrides=True))
+        session.commit()
+        yield
+        clear_db_pools()
+
+    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle", "heavy_pool")
+    def test_materialize_with_overrides(self, test_client, session):
+        response = test_client.post(
+            "/assets/1/materialize", json={"overrides": {"tasks": {"task": {"pool": "heavy"}}}}
+        )
+
+        assert response.status_code == 200
+        run_id = response.json()["dag_run_id"]
+        assert session.scalars(select(TaskInstance.pool).where(TaskInstance.run_id == run_id)).all() == [
+            "heavy"
+        ]
+
+    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle", "heavy_pool")
+    def test_materialize_overrides_require_dag_edit_access(self, test_client, session, deny_dag_edit_access):
+        response = test_client.post(
+            "/assets/1/materialize", json={"overrides": {"tasks": {"task": {"pool": "heavy"}}}}
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == f"Overrides requires permission to edit Dag: {self.DAG_ASSET1_ID}"
+        assert session.scalar(select(func.count()).select_from(DagRun)) == 0
 
     @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")
     def test_should_respond_200_with_partition_key(self, test_client):

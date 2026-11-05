@@ -5258,6 +5258,40 @@ export const $DagRunMutableStates = {
     description: 'Dag Run states from which the run may be mutated (patched, deleted).'
 } as const;
 
+export const $DagRunSchedulingOverrides = {
+    properties: {
+        tasks: {
+            additionalProperties: {
+                '$ref': '#/components/schemas/TaskSchedulingOverride'
+            },
+            type: 'object',
+            title: 'Tasks',
+            description: 'Keyed by task ID or TaskGroup ID. A group entry applies to every task in the group, nested groups included; a task entry wins over a group entry.'
+        },
+        pools: {
+            additionalProperties: {
+                type: 'string',
+                maxLength: 256,
+                minLength: 1
+            },
+            propertyNames: {
+                maxLength: 256,
+                minLength: 1
+            },
+            type: 'object',
+            title: 'Pools',
+            description: 'Moves every task of the run whose pool would otherwise be the key.'
+        }
+    },
+    additionalProperties: false,
+    type: 'object',
+    title: 'DagRunSchedulingOverrides',
+    description: `Per-run scheduling overrides.
+
+Setting any requires permission to edit the Dag. Pools must have \`\`allow_overrides\`\` set and
+queues must be listed in \`\`[core] override_target_queues\`\`.`
+} as const;
+
 export const $DagRunState = {
     type: 'string',
     enum: ['queued', 'running', 'success', 'failed'],
@@ -6871,6 +6905,17 @@ export const $MaterializeAssetBody = {
             title: 'Drain Dag',
             description: 'Drain the Dag together with this run. Draining changes the whole Dag: unfinished runs can start or resume except those held by paused backfills. No scheduled runs are created, and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining to complete. Requires the same permission as pausing the Dag.',
             default: false
+        },
+        overrides: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/DagRunSchedulingOverrides'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            description: 'Pool, pool slots, priority weight or queue for named tasks or TaskGroups of this run only. Requires permission to edit the Dag, and only pools and queues an administrator nominated can be used.'
         }
     },
     additionalProperties: false,
@@ -7332,6 +7377,12 @@ export const $PoolBody = {
             title: 'Include Deferred',
             default: false
         },
+        allow_overrides: {
+            type: 'boolean',
+            title: 'Allow Overrides',
+            description: "Whether a trigger-time override may send tasks to this pool. Anyone who can edit a Dag can then move that Dag's tasks here for one run.",
+            default: false
+        },
         team_name: {
             anyOf: [
                 {
@@ -7420,6 +7471,17 @@ export const $PoolPatchBody = {
             ],
             title: 'Include Deferred'
         },
+        allow_overrides: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Allow Overrides'
+        },
         team_name: {
             anyOf: [
                 {
@@ -7465,6 +7527,12 @@ export const $PoolResponse = {
         include_deferred: {
             type: 'boolean',
             title: 'Include Deferred'
+        },
+        allow_overrides: {
+            type: 'boolean',
+            title: 'Allow Overrides',
+            description: "Whether a trigger-time override may send tasks to this pool. Anyone who can edit a Dag can then move that Dag's tasks here for one run.",
+            default: false
         },
         occupied_slots: {
             type: 'integer',
@@ -10357,6 +10425,64 @@ export const $TaskResponse = {
     description: 'Task serializer for responses.'
 } as const;
 
+export const $TaskSchedulingOverride = {
+    properties: {
+        pool: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 256,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Pool'
+        },
+        pool_slots: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    exclusiveMinimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Pool Slots'
+        },
+        priority_weight: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Priority Weight'
+        },
+        queue: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 256,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Queue'
+        }
+    },
+    additionalProperties: false,
+    type: 'object',
+    title: 'TaskSchedulingOverride',
+    description: 'Scheduling values for a task, or every task of a TaskGroup, in one run.'
+} as const;
+
 export const $TaskStateStoreBody = {
     properties: {
         value: {
@@ -10687,6 +10813,17 @@ export const $TriggerDAGRunPostBody = {
             title: 'Drain Dag',
             description: 'Drain the Dag together with this run. Draining changes the whole Dag: unfinished runs can start or resume except those held by paused backfills. No scheduled runs are created, and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining to complete. Requires the same permission as pausing the Dag.',
             default: false
+        },
+        overrides: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/DagRunSchedulingOverrides'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            description: 'Pool, pool slots, priority weight or queue for named tasks or TaskGroups of this run only. Requires permission to edit the Dag, and only pools and queues an administrator nominated can be used.'
         }
     },
     additionalProperties: false,

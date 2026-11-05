@@ -72,6 +72,7 @@ from airflow.sdk.definitions.decorators import (
 )
 from airflow.sdk.definitions.decorators.task_group import task_group as task_group
 from airflow.sdk.definitions.edges import EdgeModifier as EdgeModifier, Label as Label
+from airflow.sdk.definitions.lookup import Lookup as Lookup
 from airflow.sdk.definitions.loop import LoopDecision as LoopDecision
 from airflow.sdk.definitions.param import Param as Param
 from airflow.sdk.definitions.partition_mappers.allowed_key import AllowedKeyMapper
@@ -187,6 +188,7 @@ __all__ = [
     "IdentityMapper",
     "Label",
     "LoopDecision",
+    "Lookup",
     "Metadata",
     "MinimumCount",
     "MonthWindow",

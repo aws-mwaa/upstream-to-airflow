@@ -787,10 +787,25 @@ class DAG:
         self.timetable.validate()
         self.validate_setup_teardown()
         check_expansions_over_loop_tasks(self)
+        self.validate_scheduling_lookups()
 
         # We validate owner links on set, but since it's a dict it could be mutated without calling the
         # setter. Validate again here
         self._validate_owner_links(None, self.owner_links)
+
+    def validate_scheduling_lookups(self):
+        """
+        Check each task's Lookups against the Dag's params.
+
+        A task created before it joined the Dag could not read the param defaults, so its plain
+        field values are set again here, before cluster policies see them.
+
+        :meta private:
+        """
+        for task in self.tasks:
+            for field, lookup in getattr(task, "scheduling_lookups", {}).items():
+                lookup.validate_for(field, task.task_id, self)
+                setattr(task, field, lookup.get_parse_time_value(field, self))
 
     def validate_setup_teardown(self):
         """

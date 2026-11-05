@@ -49,6 +49,7 @@ from airflow.models.dagbundle import DagBundleModel
 from airflow.models.dagrun import DagRun
 from airflow.models.deadline import Deadline
 from airflow.models.deadline_alert import DeadlineAlert as DeadlineAlertModel
+from airflow.models.run_scheduling import validate_run_scheduling
 from airflow.models.task_coordinates import public_map_index_expression
 from airflow.models.tasklog import LogTemplate
 from airflow.serialization.decoders import (
@@ -631,6 +632,7 @@ class SerializedDAG:
         partition_date: datetime.datetime | None = None,
         note: str | None = None,
         dag_version: DagVersion | None = None,
+        scheduling_overrides: dict[str, Any] | None = None,
         session: Session = NEW_SESSION,
     ) -> DagRun:
         """
@@ -645,6 +647,8 @@ class SerializedDAG:
         :param start_date: the date this dag run should be evaluated
         :param creating_job_id: ID of the job creating this DagRun
         :param backfill_id: ID of the backfill run if one exists
+        :param scheduling_overrides: AIP-117 ``{"tasks": ..., "pools": ...}`` overrides. The caller
+            must have checked that the user may set them.
         :param session: Unused. Only added in compatibility with database isolation mode
         :return: The created DAG run.
 
@@ -720,7 +724,14 @@ class SerializedDAG:
         params_dag.validate_partition_key(partition_key)
 
         copied_params = params_dag.params.deep_merge(conf)
-        copied_params.validate()
+        validated_params = copied_params.validate()
+        validate_run_scheduling(
+            params_dag,
+            run_type=run_type,
+            params=validated_params,
+            overrides=scheduling_overrides,
+            session=session,
+        )
         orm_dagrun = _create_orm_dagrun(
             dag=self,
             run_id=run_id,
@@ -741,6 +752,7 @@ class SerializedDAG:
             note=note,
             dag_version=dag_version,
             resolved_dag=params_dag if bundle_version is not None else None,
+            scheduling_overrides=scheduling_overrides,
             session=session,
         )
 
@@ -1454,6 +1466,7 @@ def _create_orm_dagrun(
     note: str | None = None,
     dag_version: DagVersion | None = None,
     resolved_dag: SerializedDAG | None = None,
+    scheduling_overrides: dict[str, Any] | None = None,
     session: Session = NEW_SESSION,
 ) -> DagRun:
     resolved_bundle_version: str | None = None
@@ -1489,6 +1502,7 @@ def _create_orm_dagrun(
         partition_key=partition_key,
         partition_date=partition_date,
         note=note,
+        scheduling_overrides=scheduling_overrides,
     )
     # Load defaults into the following two fields to ensure result can be serialized detached
     max_log_template_id = session.scalar(select(func.max(LogTemplate.__table__.c.id)))

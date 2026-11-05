@@ -484,6 +484,15 @@ core:
       type: integer
       example: ~
       default: "128"
+    override_target_queues:
+      description: |
+        Comma-separated queues that a trigger-time override may move a task to (AIP-117). Anyone who
+        can edit a Dag can send that Dag's tasks to a listed queue for one run, so list only queues
+        whose workers every Dag editor may use. Leave empty to refuse queue overrides.
+      version_added: 3.5.0
+      type: string
+      example: "gpu,highmem"
+      default: ""
     max_map_length:
       description: |
         The maximum list/dict length an XCom can push to trigger task mapping. If the pushed list/dict has a

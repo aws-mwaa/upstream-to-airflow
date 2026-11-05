@@ -9,7 +9,8 @@ from enum import Enum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints
+from typing_extensions import TypeAliasType
 
 
 class AppBuilderMenuItemResponse(BaseModel):
@@ -729,6 +730,11 @@ class DagRunMutableStates(str, Enum):
     FAILED = "failed"
 
 
+PoolsAdditionalProperty = TypeAliasType(
+    "PoolsAdditionalProperty", Annotated[str, Field(max_length=256, min_length=1)]
+)
+
+
 class DagRunState(str, Enum):
     """
     All possible states that a DagRun can be in.
@@ -1101,32 +1107,6 @@ class LoopIterationResponse(BaseModel):
     ]
 
 
-class MaterializeAssetBody(BaseModel):
-    """
-    Materialize asset request.
-    """
-
-    model_config = ConfigDict(
-        extra="forbid",
-    )
-    dag_run_id: Annotated[str | None, Field(title="Dag Run Id")] = None
-    data_interval_start: Annotated[datetime | None, Field(title="Data Interval Start")] = None
-    data_interval_end: Annotated[datetime | None, Field(title="Data Interval End")] = None
-    logical_date: Annotated[datetime | None, Field(title="Logical Date")] = None
-    run_after: Annotated[datetime | None, Field(title="Run After")] = None
-    conf: Annotated[dict[str, Any] | None, Field(title="Conf")] = None
-    note: Annotated[str | None, Field(title="Note")] = None
-    partition_key: Annotated[str | None, Field(title="Partition Key")] = None
-    bundle_version: Annotated[str | None, Field(title="Bundle Version")] = None
-    drain_dag: Annotated[
-        bool | None,
-        Field(
-            description="Drain the Dag together with this run. Draining changes the whole Dag: unfinished runs can start or resume except those held by paused backfills. No scheduled runs are created, and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining to complete. Requires the same permission as pausing the Dag.",
-            title="Drain Dag",
-        ),
-    ] = False
-
-
 class NewTaskResponse(BaseModel):
     """
     Lightweight response for new tasks that don't have TaskInstances yet.
@@ -1216,6 +1196,13 @@ class PoolBody(BaseModel):
     slots: Annotated[int, Field(description="Number of slots. Use -1 for unlimited.", ge=-1, title="Slots")]
     description: Annotated[str | None, Field(title="Description")] = None
     include_deferred: Annotated[bool | None, Field(title="Include Deferred")] = False
+    allow_overrides: Annotated[
+        bool | None,
+        Field(
+            description="Whether a trigger-time override may send tasks to this pool. Anyone who can edit a Dag can then move that Dag's tasks here for one run.",
+            title="Allow Overrides",
+        ),
+    ] = False
     team_name: Annotated[TeamName | None, Field(title="Team Name")] = None
 
 
@@ -1235,6 +1222,7 @@ class PoolPatchBody(BaseModel):
     slots: Annotated[Slots | None, Field(title="Slots")] = None
     description: Annotated[str | None, Field(title="Description")] = None
     include_deferred: Annotated[bool | None, Field(title="Include Deferred")] = None
+    allow_overrides: Annotated[bool | None, Field(title="Allow Overrides")] = None
     team_name: Annotated[TeamName | None, Field(title="Team Name")] = None
 
 
@@ -1247,6 +1235,13 @@ class PoolResponse(BaseModel):
     slots: Annotated[int, Field(description="Number of slots. Use -1 for unlimited.", ge=-1, title="Slots")]
     description: Annotated[str | None, Field(title="Description")] = None
     include_deferred: Annotated[bool, Field(title="Include Deferred")]
+    allow_overrides: Annotated[
+        bool | None,
+        Field(
+            description="Whether a trigger-time override may send tasks to this pool. Anyone who can edit a Dag can then move that Dag's tasks here for one run.",
+            title="Allow Overrides",
+        ),
+    ] = False
     occupied_slots: Annotated[int, Field(title="Occupied Slots")]
     running_slots: Annotated[int, Field(title="Running Slots")]
     queued_slots: Annotated[int, Field(title="Queued Slots")]
@@ -1569,6 +1564,32 @@ class TaskOutletAssetReference(BaseModel):
     team_name: Annotated[str | None, Field(title="Team Name")] = None
 
 
+class Pool(RootModel[str]):
+    root: Annotated[str, Field(max_length=256, min_length=1, title="Pool")]
+
+
+class PoolSlots(RootModel[int]):
+    root: Annotated[int, Field(gt=0, title="Pool Slots")]
+
+
+class Queue(RootModel[str]):
+    root: Annotated[str, Field(max_length=256, min_length=1, title="Queue")]
+
+
+class TaskSchedulingOverride(BaseModel):
+    """
+    Scheduling values for a task, or every task of a TaskGroup, in one run.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    pool: Annotated[Pool | None, Field(title="Pool")] = None
+    pool_slots: Annotated[PoolSlots | None, Field(title="Pool Slots")] = None
+    priority_weight: Annotated[int | None, Field(title="Priority Weight")] = None
+    queue: Annotated[Queue | None, Field(title="Queue")] = None
+
+
 class TaskStateStoreBody(BaseModel):
     """
     Request body for setting a task state store value.
@@ -1640,32 +1661,6 @@ class TriggerCallbackReferenceResponse(BaseModel):
     dag_id: Annotated[str | None, Field(title="Dag Id")]
     dag_run_id: Annotated[str | None, Field(title="Dag Run Id")]
     state: Annotated[str | None, Field(title="State")]
-
-
-class TriggerDAGRunPostBody(BaseModel):
-    """
-    Trigger Dag Run Serializer for POST body.
-    """
-
-    model_config = ConfigDict(
-        extra="forbid",
-    )
-    dag_run_id: Annotated[str | None, Field(title="Dag Run Id")] = None
-    data_interval_start: Annotated[datetime | None, Field(title="Data Interval Start")] = None
-    data_interval_end: Annotated[datetime | None, Field(title="Data Interval End")] = None
-    logical_date: Annotated[datetime | None, Field(title="Logical Date")]
-    run_after: Annotated[datetime | None, Field(title="Run After")] = None
-    conf: Annotated[dict[str, Any] | None, Field(title="Conf")] = None
-    note: Annotated[str | None, Field(title="Note")] = None
-    partition_key: Annotated[str | None, Field(title="Partition Key")] = None
-    bundle_version: Annotated[str | None, Field(title="Bundle Version")] = None
-    drain_dag: Annotated[
-        bool | None,
-        Field(
-            description="Drain the Dag together with this run. Draining changes the whole Dag: unfinished runs can start or resume except those held by paused backfills. No scheduled runs are created, and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining to complete. Requires the same permission as pausing the Dag.",
-            title="Drain Dag",
-        ),
-    ] = False
 
 
 class TriggerKind(str, Enum):
@@ -2582,6 +2577,32 @@ class DagProcessorInfoResponse(BaseModel):
     instances: Annotated[list[DagProcessorInstanceInfoResponse] | None, Field(title="Instances")] = None
 
 
+class DagRunSchedulingOverrides(BaseModel):
+    """
+    Per-run scheduling overrides.
+
+    Setting any requires permission to edit the Dag. Pools must have ``allow_overrides`` set and
+    queues must be listed in ``[core] override_target_queues``.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    tasks: Annotated[
+        dict[str, TaskSchedulingOverride] | None,
+        Field(
+            description="Keyed by task ID or TaskGroup ID. A group entry applies to every task in the group, nested groups included; a task entry wins over a group entry.",
+            title="Tasks",
+        ),
+    ] = None
+    pools: Annotated[
+        dict[Annotated[str, StringConstraints(min_length=1, max_length=256)], PoolsAdditionalProperty] | None,
+        Field(
+            description="Moves every task of the run whose pool would otherwise be the key.", title="Pools"
+        ),
+    ] = None
+
+
 class DagStatsResponse(BaseModel):
     """
     Dag Stats serializer for responses.
@@ -2747,6 +2768,38 @@ class JobCollectionResponse(BaseModel):
 
     jobs: Annotated[list[JobResponse], Field(title="Jobs")]
     total_entries: Annotated[int, Field(title="Total Entries")]
+
+
+class MaterializeAssetBody(BaseModel):
+    """
+    Materialize asset request.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    dag_run_id: Annotated[str | None, Field(title="Dag Run Id")] = None
+    data_interval_start: Annotated[datetime | None, Field(title="Data Interval Start")] = None
+    data_interval_end: Annotated[datetime | None, Field(title="Data Interval End")] = None
+    logical_date: Annotated[datetime | None, Field(title="Logical Date")] = None
+    run_after: Annotated[datetime | None, Field(title="Run After")] = None
+    conf: Annotated[dict[str, Any] | None, Field(title="Conf")] = None
+    note: Annotated[str | None, Field(title="Note")] = None
+    partition_key: Annotated[str | None, Field(title="Partition Key")] = None
+    bundle_version: Annotated[str | None, Field(title="Bundle Version")] = None
+    drain_dag: Annotated[
+        bool | None,
+        Field(
+            description="Drain the Dag together with this run. Draining changes the whole Dag: unfinished runs can start or resume except those held by paused backfills. No scheduled runs are created, and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining to complete. Requires the same permission as pausing the Dag.",
+            title="Drain Dag",
+        ),
+    ] = False
+    overrides: Annotated[
+        DagRunSchedulingOverrides | None,
+        Field(
+            description="Pool, pool slots, priority weight or queue for named tasks or TaskGroups of this run only. Requires permission to edit the Dag, and only pools and queues an administrator nominated can be used."
+        ),
+    ] = None
 
 
 class PatchTaskInstanceBody(BaseModel):
@@ -3065,6 +3118,38 @@ class TaskStateStoreCollectionResponse(BaseModel):
 
     task_state_store: Annotated[list[TaskStateStoreResponse], Field(title="Task State Store")]
     total_entries: Annotated[int, Field(title="Total Entries")]
+
+
+class TriggerDAGRunPostBody(BaseModel):
+    """
+    Trigger Dag Run Serializer for POST body.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    dag_run_id: Annotated[str | None, Field(title="Dag Run Id")] = None
+    data_interval_start: Annotated[datetime | None, Field(title="Data Interval Start")] = None
+    data_interval_end: Annotated[datetime | None, Field(title="Data Interval End")] = None
+    logical_date: Annotated[datetime | None, Field(title="Logical Date")]
+    run_after: Annotated[datetime | None, Field(title="Run After")] = None
+    conf: Annotated[dict[str, Any] | None, Field(title="Conf")] = None
+    note: Annotated[str | None, Field(title="Note")] = None
+    partition_key: Annotated[str | None, Field(title="Partition Key")] = None
+    bundle_version: Annotated[str | None, Field(title="Bundle Version")] = None
+    drain_dag: Annotated[
+        bool | None,
+        Field(
+            description="Drain the Dag together with this run. Draining changes the whole Dag: unfinished runs can start or resume except those held by paused backfills. No scheduled runs are created, and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining to complete. Requires the same permission as pausing the Dag.",
+            title="Drain Dag",
+        ),
+    ] = False
+    overrides: Annotated[
+        DagRunSchedulingOverrides | None,
+        Field(
+            description="Pool, pool slots, priority weight or queue for named tasks or TaskGroups of this run only. Requires permission to edit the Dag, and only pools and queues an administrator nominated can be used."
+        ),
+    ] = None
 
 
 class TriggerDetailResponse(BaseModel):

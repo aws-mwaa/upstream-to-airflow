@@ -36,11 +36,12 @@ from airflow.ti_deps.deps.prev_dagrun_dep import PrevDagrunDep
 from airflow.ti_deps.deps.trigger_rule_dep import TriggerRuleDep
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Iterator, Sequence
+    from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 
     from airflow.models.taskinstance import TaskInstance
     from airflow.sdk import Context
     from airflow.serialization.definitions.dag import SerializedDAG
+    from airflow.serialization.definitions.lookup import SerializedLookup
     from airflow.serialization.definitions.mappedoperator import SerializedMappedOperator
     from airflow.serialization.definitions.taskgroup import SerializedMappedTaskGroup, SerializedTaskGroup
     from airflow.task.trigger_rule import TriggerRule
@@ -123,6 +124,8 @@ class SerializedBaseOperator(DAGNode):
     pool_slots: int = 1
     priority_weight: int = 1
     queue: str = "default"
+    # Set per instance when the Dag author used a Lookup; the plain fields above hold its fallback.
+    scheduling_lookups: Mapping[str, SerializedLookup] = {}
 
     render_template_as_native_obj: bool | None = None
     resources: dict[str, Any] | None = None

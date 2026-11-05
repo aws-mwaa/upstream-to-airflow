@@ -16238,6 +16238,38 @@ components:
       - failed
       title: DagRunMutableStates
       description: Dag Run states from which the run may be mutated (patched, deleted).
+    DagRunSchedulingOverrides:
+      properties:
+        tasks:
+          additionalProperties:
+            $ref: '#/components/schemas/TaskSchedulingOverride'
+          type: object
+          title: Tasks
+          description: Keyed by task ID or TaskGroup ID. A group entry applies to
+            every task in the group, nested groups included; a task entry wins over
+            a group entry.
+        pools:
+          additionalProperties:
+            type: string
+            maxLength: 256
+            minLength: 1
+          propertyNames:
+            maxLength: 256
+            minLength: 1
+          type: object
+          title: Pools
+          description: Moves every task of the run whose pool would otherwise be the
+            key.
+      additionalProperties: false
+      type: object
+      title: DagRunSchedulingOverrides
+      description: 'Per-run scheduling overrides.
+
+
+        Setting any requires permission to edit the Dag. Pools must have ``allow_overrides``
+        set and
+
+        queues must be listed in ``[core] override_target_queues``.'
     DagRunState:
       type: string
       enum:
@@ -17405,6 +17437,13 @@ components:
             unfinished runs finish. Paused backfills must be resumed for draining
             to complete. Requires the same permission as pausing the Dag.'
           default: false
+        overrides:
+          anyOf:
+          - $ref: '#/components/schemas/DagRunSchedulingOverrides'
+          - type: 'null'
+          description: Pool, pool slots, priority weight or queue for named tasks
+            or TaskGroups of this run only. Requires permission to edit the Dag, and
+            only pools and queues an administrator nominated can be used.
       additionalProperties: false
       type: object
       title: MaterializeAssetBody
@@ -17753,6 +17792,13 @@ components:
           type: boolean
           title: Include Deferred
           default: false
+        allow_overrides:
+          type: boolean
+          title: Allow Overrides
+          description: Whether a trigger-time override may send tasks to this pool.
+            Anyone who can edit a Dag can then move that Dag's tasks here for one
+            run.
+          default: false
         team_name:
           anyOf:
           - type: string
@@ -17806,6 +17852,11 @@ components:
           - type: boolean
           - type: 'null'
           title: Include Deferred
+        allow_overrides:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Allow Overrides
         team_name:
           anyOf:
           - type: string
@@ -17834,6 +17885,13 @@ components:
         include_deferred:
           type: boolean
           title: Include Deferred
+        allow_overrides:
+          type: boolean
+          title: Allow Overrides
+          description: Whether a trigger-time override may send tasks to this pool.
+            Anyone who can edit a Dag can then move that Dag's tasks here for one
+            run.
+          default: false
         occupied_slots:
           type: integer
           title: Occupied Slots
@@ -19591,6 +19649,38 @@ components:
       - extra_links
       title: TaskResponse
       description: Task serializer for responses.
+    TaskSchedulingOverride:
+      properties:
+        pool:
+          anyOf:
+          - type: string
+            maxLength: 256
+            minLength: 1
+          - type: 'null'
+          title: Pool
+        pool_slots:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Pool Slots
+        priority_weight:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Priority Weight
+        queue:
+          anyOf:
+          - type: string
+            maxLength: 256
+            minLength: 1
+          - type: 'null'
+          title: Queue
+      additionalProperties: false
+      type: object
+      title: TaskSchedulingOverride
+      description: Scheduling values for a task, or every task of a TaskGroup, in
+        one run.
     TaskStateStoreBody:
       properties:
         value:
@@ -19821,6 +19911,13 @@ components:
             unfinished runs finish. Paused backfills must be resumed for draining
             to complete. Requires the same permission as pausing the Dag.'
           default: false
+        overrides:
+          anyOf:
+          - $ref: '#/components/schemas/DagRunSchedulingOverrides'
+          - type: 'null'
+          description: Pool, pool slots, priority weight or queue for named tasks
+            or TaskGroups of this run only. Requires permission to edit the Dag, and
+            only pools and queues an administrator nominated can be used.
       additionalProperties: false
       type: object
       required:

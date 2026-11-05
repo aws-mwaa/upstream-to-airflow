@@ -134,6 +134,7 @@ class TestGetPool(TestPoolsEndpoint):
         assert response.json() == {
             "deferred_slots": 0,
             "description": None,
+            "allow_overrides": False,
             "include_deferred": True,
             "name": "pool1",
             "occupied_slots": 0,
@@ -167,6 +168,7 @@ class TestGetPool(TestPoolsEndpoint):
         assert response.json() == {
             "deferred_slots": 0,
             "description": "Some Description",
+            "allow_overrides": False,
             "include_deferred": False,
             "name": "pool3/with_slashes",
             "occupied_slots": 0,
@@ -189,6 +191,7 @@ class TestGetPool(TestPoolsEndpoint):
         assert response.json() == {
             "deferred_slots": 0,
             "description": None,
+            "allow_overrides": False,
             "include_deferred": False,
             "name": "unlimited_pool",
             "occupied_slots": 0,
@@ -291,14 +294,18 @@ class TestPatchPool(TestPoolsEndpoint):
                 {},
                 {},
                 400,
-                {"detail": "Only slots and included_deferred can be modified on Default Pool"},
+                {
+                    "detail": "Only slots, include_deferred and allow_overrides can be modified on Default Pool"
+                },
             ),
             (
                 Pool.DEFAULT_POOL_NAME,
                 {"update_mask": ["description"]},
                 {"pool": Pool.DEFAULT_POOL_NAME},
                 400,
-                {"detail": "Only slots and included_deferred can be modified on Default Pool"},
+                {
+                    "detail": "Only slots, include_deferred and allow_overrides can be modified on Default Pool"
+                },
             ),
             (
                 "unknown_pool",
@@ -356,6 +363,7 @@ class TestPatchPool(TestPoolsEndpoint):
                 {
                     "deferred_slots": 0,
                     "description": "Default pool",
+                    "allow_overrides": False,
                     "include_deferred": False,
                     "name": "default_pool",
                     "occupied_slots": 0,
@@ -376,6 +384,7 @@ class TestPatchPool(TestPoolsEndpoint):
                 {
                     "deferred_slots": 0,
                     "description": "Default pool",
+                    "allow_overrides": False,
                     "include_deferred": True,
                     "name": "default_pool",
                     "occupied_slots": 0,
@@ -384,6 +393,27 @@ class TestPatchPool(TestPoolsEndpoint):
                     "running_slots": 0,
                     "scheduled_slots": 0,
                     "slots": 150,
+                    "team_name": None,
+                },
+            ),
+            # Nominating default_pool as an override target
+            (
+                Pool.DEFAULT_POOL_NAME,
+                {"update_mask": ["allow_overrides"]},
+                {"pool": Pool.DEFAULT_POOL_NAME, "allow_overrides": True},
+                200,
+                {
+                    "deferred_slots": 0,
+                    "description": "Default pool",
+                    "allow_overrides": True,
+                    "include_deferred": False,
+                    "name": "default_pool",
+                    "occupied_slots": 0,
+                    "open_slots": 128,
+                    "queued_slots": 0,
+                    "running_slots": 0,
+                    "scheduled_slots": 0,
+                    "slots": 128,
                     "team_name": None,
                 },
             ),
@@ -401,6 +431,7 @@ class TestPatchPool(TestPoolsEndpoint):
                 {
                     "deferred_slots": 0,
                     "description": "Description Updated",
+                    "allow_overrides": False,
                     "include_deferred": False,
                     "name": POOL1_NAME,
                     "occupied_slots": 0,
@@ -455,6 +486,7 @@ class TestPatchPool(TestPoolsEndpoint):
         expected_response = {
             "deferred_slots": 0,
             "description": "Updated Description",
+            "allow_overrides": False,
             "include_deferred": True,
             "name": "pool3/with_slashes",
             "occupied_slots": 0,
@@ -513,6 +545,7 @@ class TestPostPool(TestPoolsEndpoint):
                     "name": "my_pool",
                     "slots": 11,
                     "description": None,
+                    "allow_overrides": False,
                     "include_deferred": False,
                     "occupied_slots": 0,
                     "running_slots": 0,
@@ -530,6 +563,7 @@ class TestPostPool(TestPoolsEndpoint):
                     "name": "my_pool",
                     "slots": 11,
                     "description": "Some description",
+                    "allow_overrides": False,
                     "include_deferred": True,
                     "occupied_slots": 0,
                     "running_slots": 0,
@@ -553,6 +587,7 @@ class TestPostPool(TestPoolsEndpoint):
                     "name": "my_pool",
                     "slots": 11,
                     "description": "Some description",
+                    "allow_overrides": False,
                     "include_deferred": True,
                     "occupied_slots": 0,
                     "running_slots": 0,
@@ -659,6 +694,7 @@ class TestPostPool(TestPoolsEndpoint):
                     "name": "my_pool",
                     "slots": 11,
                     "description": None,
+                    "allow_overrides": False,
                     "include_deferred": False,
                     "occupied_slots": 0,
                     "running_slots": 0,

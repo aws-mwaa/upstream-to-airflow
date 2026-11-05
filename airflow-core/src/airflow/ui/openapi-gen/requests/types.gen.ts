@@ -1396,6 +1396,27 @@ export type DagRunAssetReference = {
 export type DagRunMutableStates = 'queued' | 'success' | 'failed';
 
 /**
+ * Per-run scheduling overrides.
+ *
+ * Setting any requires permission to edit the Dag. Pools must have ``allow_overrides`` set and
+ * queues must be listed in ``[core] override_target_queues``.
+ */
+export type DagRunSchedulingOverrides = {
+    /**
+     * Keyed by task ID or TaskGroup ID. A group entry applies to every task in the group, nested groups included; a task entry wins over a group entry.
+     */
+    tasks?: {
+        [key: string]: TaskSchedulingOverride;
+    };
+    /**
+     * Moves every task of the run whose pool would otherwise be the key.
+     */
+    pools?: {
+        [key: string]: (string);
+    };
+};
+
+/**
  * All possible states that a DagRun can be in.
  *
  * These are "shared" with TaskInstanceState in some parts of the code,
@@ -1880,6 +1901,10 @@ export type MaterializeAssetBody = {
      * Drain the Dag together with this run. Draining changes the whole Dag: unfinished runs can start or resume except those held by paused backfills. No scheduled runs are created, and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining to complete. Requires the same permission as pausing the Dag.
      */
     drain_dag?: boolean;
+    /**
+     * Pool, pool slots, priority weight or queue for named tasks or TaskGroups of this run only. Requires permission to edit the Dag, and only pools and queues an administrator nominated can be used.
+     */
+    overrides?: DagRunSchedulingOverrides | null;
 };
 
 /**
@@ -2014,6 +2039,10 @@ export type PoolBody = {
     slots: number;
     description?: string | null;
     include_deferred?: boolean;
+    /**
+     * Whether a trigger-time override may send tasks to this pool. Anyone who can edit a Dag can then move that Dag's tasks here for one run.
+     */
+    allow_overrides?: boolean;
     team_name?: string | null;
 };
 
@@ -2033,6 +2062,7 @@ export type PoolPatchBody = {
     slots?: number | null;
     description?: string | null;
     include_deferred?: boolean | null;
+    allow_overrides?: boolean | null;
     team_name?: string | null;
 };
 
@@ -2047,6 +2077,10 @@ export type PoolResponse = {
     slots: number;
     description?: string | null;
     include_deferred: boolean;
+    /**
+     * Whether a trigger-time override may send tasks to this pool. Anyone who can edit a Dag can then move that Dag's tasks here for one run.
+     */
+    allow_overrides?: boolean;
     occupied_slots: number;
     running_slots: number;
     queued_slots: number;
@@ -2600,6 +2634,16 @@ export type TaskResponse = {
 };
 
 /**
+ * Scheduling values for a task, or every task of a TaskGroup, in one run.
+ */
+export type TaskSchedulingOverride = {
+    pool?: string | null;
+    pool_slots?: number | null;
+    priority_weight?: number | null;
+    queue?: string | null;
+};
+
+/**
  * Request body for setting a task state store value.
  *
  * ``expires_at`` controls expiry:
@@ -2695,6 +2739,10 @@ export type TriggerDAGRunPostBody = {
      * Drain the Dag together with this run. Draining changes the whole Dag: unfinished runs can start or resume except those held by paused backfills. No scheduled runs are created, and the Dag pauses once all unfinished runs finish. Paused backfills must be resumed for draining to complete. Requires the same permission as pausing the Dag.
      */
     drain_dag?: boolean;
+    /**
+     * Pool, pool slots, priority weight or queue for named tasks or TaskGroups of this run only. Requires permission to edit the Dag, and only pools and queues an administrator nominated can be used.
+     */
+    overrides?: DagRunSchedulingOverrides | null;
 };
 
 /**

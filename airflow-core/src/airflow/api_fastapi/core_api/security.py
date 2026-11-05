@@ -549,6 +549,21 @@ _BACKFILL_ID_ADAPTER: TypeAdapter[NonNegativeInt] = TypeAdapter(NonNegativeInt)
 BACKFILL_NOT_FOUND = "Backfill not found"
 
 
+def check_dag_edit_access(dag_id: str, action: str, *, user: BaseUser, session: Session) -> None:
+    """
+    Raise 403 unless ``user`` may edit the Dag.
+
+    Used by trigger options that need more than trigger permission, such as draining the Dag or
+    overriding where its tasks run.
+    """
+    if not get_auth_manager().is_authorized_dag(
+        method="PUT",
+        details=DagDetails(id=dag_id, team_name=DagModel.get_team_name(dag_id, session=session)),
+        user=user,
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{action} requires permission to edit Dag: {dag_id}")
+
+
 def _authorize_backfill_in_path(method: ResourceMethod, dag_id: str | None, user: BaseUser) -> None:
     """Authorize a backfill named by the request path against that backfill's Dag alone."""
     # ``dag_id`` is None when the id matched no row. Answering 404 there while a backfill on a Dag

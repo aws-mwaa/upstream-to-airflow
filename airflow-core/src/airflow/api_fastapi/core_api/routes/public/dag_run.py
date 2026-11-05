@@ -105,6 +105,7 @@ from airflow.api_fastapi.core_api.security import (
     ReadableAssetEventsByAssetFilterDep,
     ReadableAssetEventsFilterDep,
     ReadableDagRunsFilterDep,
+    check_dag_edit_access,
     requires_access_asset,
     requires_access_dag,
     requires_access_dag_run_bulk,
@@ -836,15 +837,12 @@ def trigger_dag_run(
                     f"DAG with dag_id: '{dag_id}' does not support bundle versioning",
                 )
 
+        scheduling_overrides = body.overrides.to_stored() if body.overrides else None
         if body.drain_dag:
-            if not get_auth_manager().is_authorized_dag(
-                method="PUT",
-                details=DagDetails(id=dag_id, team_name=DagModel.get_team_name(dag_id, session=session)),
-                user=user,
-            ):
-                raise HTTPException(
-                    status.HTTP_403_FORBIDDEN, f"Draining requires permission to edit Dag: {dag_id}"
-                )
+            check_dag_edit_access(dag_id, "Draining", user=user, session=session)
+        if scheduling_overrides:
+            check_dag_edit_access(dag_id, "Overrides", user=user, session=session)
+        if body.drain_dag:
             DagModel.start_drain(dag_id, session=session)
 
         dag_run = dag.create_dagrun(
@@ -861,6 +859,7 @@ def trigger_dag_run(
             bundle_version=body.bundle_version,
             dag_version=preloaded_dag_version,
             partition_date=params["partition_date"],
+            scheduling_overrides=scheduling_overrides or None,
             session=session,
         )
 

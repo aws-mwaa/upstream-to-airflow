@@ -48,6 +48,11 @@ class BasePool(BaseModel):
     slots: PoolSlots
     description: str | None = Field(default=None)
     include_deferred: bool
+    allow_overrides: bool = Field(
+        default=False,
+        description="Whether a trigger-time override may send tasks to this pool. Anyone who can edit a Dag "
+        "can then move that Dag's tasks here for one run.",
+    )
 
 
 def _sanitize_open_slots(value) -> int:
@@ -84,6 +89,7 @@ class PoolPatchBody(StrictBaseModel):
     slots: PoolSlots | None = None
     description: str | None = None
     include_deferred: bool | None = None
+    allow_overrides: bool | None = None
     team_name: str | None = Field(max_length=50, default=None)
 
     @model_validator(mode="after")

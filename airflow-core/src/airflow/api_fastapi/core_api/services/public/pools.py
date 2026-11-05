@@ -58,11 +58,11 @@ def update_orm_from_pydantic(
     # Special restriction: default pool only allows limited fields to be patched
     pool_name = pool.pool
     if pool_name == Pool.DEFAULT_POOL_NAME:
-        if update_mask and all(mask.strip() in {"slots", "include_deferred"} for mask in update_mask):
-            # Validate only slots/include_deferred
+        default_pool_fields = {"slots", "include_deferred", "allow_overrides"}
+        if update_mask and all(mask.strip() in default_pool_fields for mask in update_mask):
             try:
                 patch_body_subset = patch_body.model_dump(
-                    include={"slots", "include_deferred"}, exclude_unset=True, by_alias=True
+                    include=default_pool_fields, exclude_unset=True, by_alias=True
                 )
                 # Re-run validation with BasePool but only on allowed fields
                 PoolPatchBody.model_validate(patch_body_subset)
@@ -71,7 +71,7 @@ def update_orm_from_pydantic(
         else:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                "Only slots and included_deferred can be modified on Default Pool",
+                "Only slots, include_deferred and allow_overrides can be modified on Default Pool",
             )
     else:
         fields_to_update = patch_body.model_fields_set

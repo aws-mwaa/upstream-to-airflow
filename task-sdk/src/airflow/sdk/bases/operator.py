@@ -63,6 +63,7 @@ from airflow.sdk.definitions._internal.node import validate_key
 from airflow.sdk.definitions._internal.setup_teardown import SetupTeardownContext
 from airflow.sdk.definitions._internal.types import NOTSET, validate_instance_args
 from airflow.sdk.definitions.edges import EdgeModifier
+from airflow.sdk.definitions.lookup import Lookup, reject_lookups_in_partial
 from airflow.sdk.definitions.mappedoperator import OperatorPartial, validate_mapping_kwargs
 from airflow.sdk.definitions.param import ParamsDict
 from airflow.sdk.exceptions import RemovedInAirflow4Warning
@@ -403,6 +404,7 @@ else:
             partial_kwargs["start_date"] = timezone.convert_to_utc(start_date)
         if end_date := partial_kwargs.get("end_date", None):
             partial_kwargs["end_date"] = timezone.convert_to_utc(end_date)
+        reject_lookups_in_partial(partial_kwargs, task_id)
         if partial_kwargs["pool_slots"] < 1:
             dag_str = ""
             if dag:
@@ -1070,11 +1072,11 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         dag: DAG | None = None,
         params: collections.abc.MutableMapping[str, Any] | None = None,
         default_args: dict | None = None,
-        priority_weight: int = DEFAULT_PRIORITY_WEIGHT,
+        priority_weight: int | Lookup = DEFAULT_PRIORITY_WEIGHT,
         weight_rule: WeightRuleParam = DEFAULT_WEIGHT_RULE,
-        queue: str = DEFAULT_QUEUE,
-        pool: str | None = None,
-        pool_slots: int = DEFAULT_POOL_SLOTS,
+        queue: str | Lookup = DEFAULT_QUEUE,
+        pool: str | Lookup | None = None,
+        pool_slots: int | Lookup = DEFAULT_POOL_SLOTS,
         sla: timedelta | None = None,
         execution_timeout: timedelta | None = DEFAULT_TASK_EXECUTION_TIMEOUT,
         on_execute_callback: None | TaskStateChangeCallback | Collection[TaskStateChangeCallback] = None,
@@ -1175,9 +1177,10 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         # TODO:
         # self.retries = parse_retries(retries)
         self.retries = retries
-        self.queue = queue
-        self.pool = DEFAULT_POOL_NAME if pool is None else pool
-        self.pool_slots = pool_slots
+        self.scheduling_lookups: dict[str, Lookup] = {}
+        self.queue = self._take_lookup("queue", queue, dag)
+        self.pool = DEFAULT_POOL_NAME if pool is None else self._take_lookup("pool", pool, dag)
+        self.pool_slots = self._take_lookup("pool_slots", pool_slots, dag)
         if self.pool_slots < 1:
             dag_str = f" in dag {dag.dag_id}" if dag else ""
             raise ValueError(f"pool slots for {self.task_id}{dag_str} cannot be less than 1")
@@ -1215,7 +1218,7 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
 
         self.params = ParamsDict(params)
 
-        self.priority_weight = priority_weight
+        self.priority_weight = self._take_lookup("priority_weight", priority_weight, dag)
         self.weight_rule = weight_rule
 
         self.max_active_tis_per_dag: int | None = max_active_tis_per_dag
@@ -1267,6 +1270,13 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
 
         # Ensure priority_weight is within the valid range
         self.priority_weight = db_safe_priority(self.priority_weight)
+
+    def _take_lookup(self, field: str, value: Any, dag: DAG | None) -> Any:
+        """Keep a Lookup aside and return the plain value the field holds while the Dag is parsed."""
+        if not isinstance(value, Lookup):
+            return value
+        self.scheduling_lookups[field] = value
+        return value.get_parse_time_value(field, dag)
 
     def __eq__(self, other):
         if type(self) is type(other):
@@ -1574,6 +1584,7 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
                     "on_retry_callback",
                     "on_skipped_callback",
                     "retry_policy",
+                    "scheduling_lookups",
                 }
                 | {  # Class level defaults, or `@property` need to be added to this list
                     "start_date",
