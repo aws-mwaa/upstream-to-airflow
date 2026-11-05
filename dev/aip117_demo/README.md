@@ -50,15 +50,19 @@ towards pools and queues an administrator nominated.
   mutation hook path), mapped expansion, clear and retry. Overrides are checked again each time and
   fall back to the next value if their target was un-nominated. `task_instance_mutation_hook` runs
   last.
+- UI: a *Scheduling Overrides* section in the trigger form (task or group, nominated pools and
+  queues only, slots, priority, and pool moves), an *Allow Overrides* checkbox and *Override target*
+  badge for pools, and the run's overrides on the Dag run *Details* tab. The Dag run API returns
+  them as `overrides`.
 - A migration adding `dag_run.scheduling_overrides` (deferred JSON), `dag_run.has_scheduling_overrides`
   and `slot_pool.allow_overrides`.
 
 ## Not in this branch
 
-`Lookup.variable()`; Lookups inside `.partial()` (overrides do reach mapped tasks); the trigger form
-overrides editor and "sets pool for N tasks" notes; showing where a value came from on the task
-instance page; returning overrides from the Dag run API; a Dag warning and fallback when a
-scheduled run's Lookup names a missing pool; the `queue_to_coordinator` runtime check; docs.
+`Lookup.variable()`; Lookups inside `.partial()` (overrides do reach mapped tasks); "sets pool for N
+tasks" notes under Lookup params in the trigger form; showing where a value came from on the task
+instance page; a Dag warning and fallback when a scheduled run's Lookup names a missing pool; the
+`queue_to_coordinator` runtime check; docs.
 
 ## Running the demo
 
@@ -77,8 +81,10 @@ breeze start-airflow
 | Bounded at parse time | `cp dev/aip117_demo/unbounded_param.py files/dags/` | Import error: the param must declare `enum` |
 | Backfill isolation | `demo.sh backfill`, then `demo.sh pools-by-run` | Backfill runs use `backfill_pool`, the scheduled run `etl_pool` |
 | Override needs nomination | `demo.sh override`, `demo.sh override-unknown` | Same 400 for an unnominated and a missing pool |
-| | `demo.sh nominate`, `demo.sh override-group`, `demo.sh tis` | `extract` and the `transform` group move to `heavy_pool` |
-| Move a run off a pool | `demo.sh remap`, `demo.sh tis` | Every `etl_pool` task of the run uses `etl_overflow_pool` |
+| | `demo.sh nominate`, or tick *Allow Overrides* when editing `heavy_pool` | The pool card gets an *Override target* badge |
+| Override from the UI | Trigger `aip117_reprocess_orders`, open *Scheduling Overrides* | Only nominated pools are offered; set `extract` to `heavy_pool` with 4 slots and the `transform` group to `heavy_pool` |
+| | Open the new run, *Details* tab, then task `extract` | The run shows its overrides next to conf; `extract` runs in `heavy_pool` with 4 slots |
+| Move a run off a pool | *Move a pool* in the same section, or `demo.sh remap`, then `demo.sh tis` | Every `etl_pool` task of the run uses `etl_overflow_pool` |
 
 `demo.sh` reads `AIRFLOW_API` (default `http://localhost:28080`) and `AIRFLOW_TOKEN` (default: a
 token for `admin` / `admin`).

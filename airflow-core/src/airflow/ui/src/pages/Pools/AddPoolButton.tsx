@@ -34,6 +34,7 @@ const AddPoolButton = () => {
   });
 
   const initialPoolValue: PoolBody = {
+    allow_overrides: false,
     description: "",
     include_deferred: false,
     name: "",

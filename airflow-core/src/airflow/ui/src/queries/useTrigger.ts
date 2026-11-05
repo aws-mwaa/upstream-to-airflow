@@ -25,6 +25,7 @@ import type { TriggerDagRunData, TriggerDagRunResponse } from "openapi/requests/
 
 import { toaster } from "src/system-components";
 
+import { toOverridesBody } from "src/components/TriggerDag/overridesBody";
 import type { DagRunTriggerParams } from "src/components/TriggerDag/types";
 
 import { SearchParamsKeys } from "src/constants/searchParams";
@@ -119,6 +120,7 @@ export const useTrigger = ({ dagId, onSuccessConfirm }: { dagId: string; onSucce
         drain_dag: dagRunRequestBody.drainDag,
         logical_date: formattedLogicalDate,
         note: checkNote,
+        overrides: toOverridesBody(dagRunRequestBody.overrides, dagRunRequestBody.poolRemaps),
         partition_key: toNullablePartitionKey(dagRunRequestBody.partitionKey),
       },
     });

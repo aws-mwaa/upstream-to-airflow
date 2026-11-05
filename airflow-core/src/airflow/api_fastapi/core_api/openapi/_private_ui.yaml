@@ -3538,6 +3538,12 @@ components:
           - type: boolean
           - type: 'null'
           title: Rerun With Latest Version
+        override_target_queues:
+          items:
+            type: string
+          type: array
+          title: Override Target Queues
+          default: []
       type: object
       required:
       - fallback_page_limit

@@ -70,6 +70,7 @@ expected_config_response = {
     "theme": THEME,
     "multi_team": False,
     "rerun_with_latest_version": None,
+    "override_target_queues": [],
 }
 
 
@@ -160,6 +161,12 @@ class TestGetConfig:
 
         assert response.status_code == 200
         assert response.json() == expected_config_response
+
+    def test_override_target_queues(self, mock_config_data, test_client):
+        with conf_vars({("core", "override_target_queues"): "highmem, gpu"}):
+            response = test_client.get("/config")
+
+        assert response.json()["override_target_queues"] == ["gpu", "highmem"]
 
     def test_get_config_should_response_401(self, unauthenticated_test_client):
         response = unauthenticated_test_client.get("/config")

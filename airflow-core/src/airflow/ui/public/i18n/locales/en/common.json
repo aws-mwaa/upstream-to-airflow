@@ -80,6 +80,7 @@
     "expectedDuration": "Expected Duration",
     "lastSchedulingDecision": "Last Scheduling Decision",
     "mappedPartitionKey": "Mapped Partition Key",
+    "overrides": "Scheduling Overrides",
     "partitionDate": "Partition Date",
     "partitionKey": "Partition Key",
     "queuedAt": "Queued At",

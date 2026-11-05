@@ -4328,6 +4328,18 @@ export const $DAGRunResponse = {
                 }
             ],
             title: 'Team Name'
+        },
+        overrides: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Overrides'
         }
     },
     type: 'object',
@@ -12048,6 +12060,14 @@ export const $ConfigResponse = {
                 }
             ],
             title: 'Rerun With Latest Version'
+        },
+        override_target_queues: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Override Target Queues',
+            default: []
         }
     },
     type: 'object',

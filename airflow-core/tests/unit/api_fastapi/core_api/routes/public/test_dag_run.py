@@ -338,6 +338,7 @@ def get_dag_run_dict(run: DagRun):
             from_datetime_to_zulu_without_ms(run.partition_date) if run.partition_date else None
         ),
         "team_name": None,
+        "overrides": None,
     }
 
 
@@ -3692,6 +3693,7 @@ class TestTriggerDagRun:
             "partition_key": None,
             "partition_date": None,
             "team_name": None,
+            "overrides": None,
         }
 
         assert response.json() == expected_response_json
@@ -3958,6 +3960,7 @@ class TestTriggerDagRun:
             "partition_key": None,
             "partition_date": None,
             "team_name": None,
+            "overrides": None,
         }
 
         assert response_2.status_code == 409
@@ -4110,6 +4113,7 @@ class TestTriggerDagRun:
         )
 
         assert response.status_code == 200
+        assert response.json()["overrides"] == {"tasks": {"task_1": {"pool": "heavy", "pool_slots": 2}}}
         run_id = response.json()["dag_run_id"]
         pools = dict(
             session.execute(
@@ -4190,6 +4194,7 @@ class TestTriggerDagRun:
             "partition_key": None,
             "partition_date": None,
             "team_name": None,
+            "overrides": None,
         }
 
     @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")

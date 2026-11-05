@@ -2489,6 +2489,7 @@ class DAGRunResponse(BaseModel):
     partition_key: Annotated[str | None, Field(title="Partition Key")]
     partition_date: Annotated[datetime | None, Field(title="Partition Date")]
     team_name: Annotated[str | None, Field(title="Team Name")] = None
+    overrides: Annotated[dict[str, Any] | None, Field(title="Overrides")] = None
 
 
 class DAGRunsBatchBody(BaseModel):

@@ -15615,6 +15615,12 @@ components:
           - type: string
           - type: 'null'
           title: Team Name
+        overrides:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Overrides
       type: object
       required:
       - dag_run_id

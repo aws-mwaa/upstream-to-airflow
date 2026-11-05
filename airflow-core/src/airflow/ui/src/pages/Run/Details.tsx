@@ -67,6 +67,14 @@ export const Details = () => {
             {hasDagRunConfig(dagRun.conf) ? <RenderedJsonField content={dagRun.conf} /> : undefined}
           </Table.Cell>
         </Table.Row>
+        {dagRun.overrides ? (
+          <Table.Row>
+            <Table.Cell>{translate("dagRun.overrides")}</Table.Cell>
+            <Table.Cell data-testid="dag-run-overrides">
+              <RenderedJsonField content={dagRun.overrides} />
+            </Table.Cell>
+          </Table.Row>
+        ) : undefined}
         <Table.Row>
           <Table.Cell>{translate("state")}</Table.Cell>
           <Table.Cell data-testid="dag-run-state">

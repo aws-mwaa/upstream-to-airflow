@@ -41,6 +41,7 @@ class ConfigResponse(BaseModel):
     theme: Theme | None
     multi_team: bool
     rerun_with_latest_version: bool | None = None
+    override_target_queues: list[str] = []
 
     @field_serializer("theme")
     def serialize_theme(self, theme: Theme | None) -> dict | None:

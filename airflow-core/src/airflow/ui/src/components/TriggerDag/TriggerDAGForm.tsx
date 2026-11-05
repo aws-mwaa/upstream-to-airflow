@@ -104,7 +104,9 @@ const TriggerDAGForm = ({
       // For partitioned Dags, logical date is not applicable.
       logicalDate: isPartitioned ? "" : dayjs().format(DEFAULT_DATETIME_FORMAT),
       note: "",
+      overrides: [],
       partitionKey: undefined,
+      poolRemaps: [],
     },
   });
 
@@ -329,7 +331,12 @@ const TriggerDAGForm = ({
           setErrors={setErrors}
           setFormError={setFormError}
         >
-          <TriggerDAGAdvancedOptions control={control} isPartitioned={isPartitioned} />
+          <TriggerDAGAdvancedOptions
+            control={control}
+            dagId={dagId}
+            isPartitioned={isPartitioned}
+            open={open}
+          />
         </ConfigForm>
       </VStack>
       <Box as="footer" display="flex" justifyContent="flex-end" mt={4}>

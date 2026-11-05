@@ -49,6 +49,7 @@ import { Modal, toaster, RadioCardItem, RadioCardRoot } from "src/system-compone
 import { ErrorAlert } from "src/components/ErrorAlert";
 import { JsonEditor } from "src/components/JsonEditor";
 import TriggerDAGForm from "src/components/TriggerDag/TriggerDAGForm";
+import { toOverridesBody } from "src/components/TriggerDag/overridesBody";
 import type { DagRunTriggerParams } from "src/components/TriggerDag/types";
 
 import { isOneOf, toNullablePartitionKey } from "src/utils";
@@ -164,6 +165,7 @@ export const CreateAssetEventModal = ({ asset, onClose, open }: Props) => {
       drain_dag: dagRunRequestBody.drainDag,
       logical_date: logicalDate?.toISOString() ?? null,
       note: dagRunRequestBody.note === "" ? undefined : dagRunRequestBody.note,
+      overrides: toOverridesBody(dagRunRequestBody.overrides, dagRunRequestBody.poolRemaps),
       partition_key: toNullablePartitionKey(dagRunRequestBody.partitionKey),
     };
 

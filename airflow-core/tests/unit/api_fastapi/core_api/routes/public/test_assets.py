@@ -2990,6 +2990,7 @@ class TestPostAssetMaterialize(TestAssets):
             "conf": {},
             "note": None,
             "team_name": None,
+            "overrides": None,
         }
 
     @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")

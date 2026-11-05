@@ -27,6 +27,7 @@ from airflow.api_fastapi.core_api.datamodels.ui.config import ConfigResponse
 from airflow.api_fastapi.core_api.openapi.exceptions import create_openapi_http_exception_doc
 from airflow.api_fastapi.core_api.security import requires_authenticated
 from airflow.configuration import conf
+from airflow.models.run_scheduling import get_override_target_queues
 from airflow.settings import DASHBOARD_UIALERTS
 from airflow.utils.log.log_reader import TaskLogReader
 
@@ -62,6 +63,7 @@ def get_configs() -> ConfigResponse:
         "external_log_name": getattr(task_log_reader.log_handler, "log_name", None),
         "theme": loads(conf.get("api", "theme", fallback="{}")) or None,
         "multi_team": conf.getboolean("core", "multi_team"),
+        "override_target_queues": sorted(get_override_target_queues()),
         # Return None when the option isn't explicitly set so the UI hook can apply
         # its own fallback (False for clear/rerun, True for backfills).
         "rerun_with_latest_version": (

@@ -122,6 +122,8 @@
     },
     "edit": "Edit $t(pools.pool_one)",
     "form": {
+      "allowOverrides": "Allow Overrides",
+      "allowOverridesCheckbox": "Check to let anyone who can edit a Dag move its tasks to this pool when triggering a run",
       "checkbox": "Check to include deferred tasks when calculating open pool slots",
       "description": "Description",
       "includeDeferred": "Include Deferred",
@@ -131,6 +133,8 @@
       "slotsHelperText": "Use -1 for unlimited slots."
     },
     "noPoolsFound": "No pools found",
+    "overrideTarget": "Override target",
+    "overrideTargetHelp": "Anyone who can edit a Dag may send its tasks to this pool for one run",
     "pool_one": "Pool",
     "pool_other": "Pools",
     "searchPlaceholder": "Search $t(pools.pool_other)",

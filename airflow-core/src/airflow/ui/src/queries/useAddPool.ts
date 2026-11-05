@@ -64,6 +64,7 @@ export const useAddPool = ({ onSuccessConfirm }: { onSuccessConfirm: () => void 
 
     mutate({
       requestBody: {
+        allow_overrides: poolRequestBody.allow_overrides,
         description: parsedDescription,
         include_deferred: poolRequestBody.include_deferred,
         name: poolRequestBody.name,

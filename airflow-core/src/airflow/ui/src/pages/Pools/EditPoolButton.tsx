@@ -36,6 +36,7 @@ const EditPoolButton = ({ pool }: Props) => {
   const { t: translate } = useTranslation("admin");
   const { onClose, onOpen, open } = useDisclosure();
   const initialPoolValue: PoolBody = {
+    allow_overrides: pool.allow_overrides ?? false,
     description: pool.description ?? "",
     include_deferred: pool.include_deferred,
     name: pool.name,

@@ -79,6 +79,9 @@ export const useEditPool = (
     if (editPoolRequestBody.include_deferred !== initialPool.include_deferred) {
       updateMask.push("include_deferred");
     }
+    if (editPoolRequestBody.allow_overrides !== initialPool.allow_overrides) {
+      updateMask.push("allow_overrides");
+    }
     if (editPoolRequestBody.team_name !== initialPool.team_name) {
       updateMask.push("team_name");
     }
@@ -88,6 +91,7 @@ export const useEditPool = (
     mutate({
       poolName: initialPool.name,
       requestBody: {
+        allow_overrides: editPoolRequestBody.allow_overrides,
         description: parsedDescription,
         include_deferred: editPoolRequestBody.include_deferred,
         pool: editPoolRequestBody.name,

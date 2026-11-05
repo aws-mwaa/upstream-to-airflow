@@ -196,6 +196,7 @@ class DAGRunResponse(BaseModel):
     partition_key: str | None
     partition_date: datetime | None
     team_name: str | None = None
+    overrides: dict | None = None
 
 
 class DAGRunCollectionResponse(BaseModel):

@@ -1163,6 +1163,9 @@ export type DAGRunResponse = {
     partition_key: string | null;
     partition_date: string | null;
     team_name?: string | null;
+    overrides?: {
+    [key: string]: unknown;
+} | null;
 };
 
 /**
@@ -3101,6 +3104,7 @@ export type ConfigResponse = {
     theme: Theme | null;
     multi_team: boolean;
     rerun_with_latest_version?: boolean | null;
+    override_target_queues?: Array<(string)>;
 };
 
 /**

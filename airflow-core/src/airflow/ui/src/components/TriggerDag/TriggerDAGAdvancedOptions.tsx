@@ -21,14 +21,22 @@ import { Controller, type Control } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
 import EditableMarkdown from "./EditableMarkdown";
+import SchedulingOverrides from "./SchedulingOverrides";
 import type { DagRunTriggerParams } from "./types";
 
 type TriggerDAGAdvancedOptionsProps = {
   readonly control: Control<DagRunTriggerParams>;
+  readonly dagId: string;
   readonly isPartitioned: boolean;
+  readonly open: boolean;
 };
 
-const TriggerDAGAdvancedOptions = ({ control, isPartitioned }: TriggerDAGAdvancedOptionsProps) => {
+const TriggerDAGAdvancedOptions = ({
+  control,
+  dagId,
+  isPartitioned,
+  open,
+}: TriggerDAGAdvancedOptionsProps) => {
   const { t: translate } = useTranslation(["common", "components"]);
   const { t: rootTranslate } = useTranslation();
 
@@ -87,6 +95,7 @@ const TriggerDAGAdvancedOptions = ({ control, isPartitioned }: TriggerDAGAdvance
           </Field.Root>
         )}
       />
+      <SchedulingOverrides control={control} dagId={dagId} open={open} />
     </>
   );
 };

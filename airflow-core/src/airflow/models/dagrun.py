@@ -1227,6 +1227,11 @@ class DagRun(Base, LoggingMixin):
         )
         return session.scalars(query).one_or_none()
 
+    @property
+    def overrides(self) -> dict[str, Any] | None:
+        """Return the run's trigger-time overrides, loading the deferred column only for runs that have them."""
+        return self.scheduling_overrides if self.has_scheduling_overrides else None
+
     def get_scheduling_values(self, task: Operator) -> dict[str, Any]:
         """Return the task's pool, pool_slots, priority_weight and queue in this run, where they differ."""
         if not getattr(task, "scheduling_lookups", None) and not self.has_scheduling_overrides:

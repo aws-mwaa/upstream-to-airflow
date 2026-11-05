@@ -18,6 +18,8 @@
  */
 import { isOneOf } from "src/utils";
 
+import type { PoolRemapRow, TaskOverrideRow } from "./overridesBody";
+
 export type DataIntervalMode = "auto" | "manual";
 
 export type PausedDagAction = "drain" | "keepPaused" | "unpause";
@@ -31,7 +33,9 @@ export type DagRunTriggerParams = {
   drainDag?: boolean;
   logicalDate: string;
   note: string;
+  overrides?: Array<TaskOverrideRow>;
   partitionKey: string | undefined;
+  poolRemaps?: Array<PoolRemapRow>;
 };
 
 export const dataIntervalModeOptions = [

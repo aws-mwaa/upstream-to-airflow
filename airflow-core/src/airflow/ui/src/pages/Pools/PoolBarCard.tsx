@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box, Flex, HStack, Text, VStack } from "@chakra-ui/react";
+import { Badge, Box, Flex, HStack, Text, VStack } from "@chakra-ui/react";
 import { useTranslation } from "react-i18next";
 
 import type { PoolResponse } from "openapi/requests/types.gen";
@@ -58,6 +58,13 @@ const PoolBarCard = ({ pool }: PoolBarCardProps) => {
               {pool.include_deferred ? (
                 <Tooltip content={translate("pools.deferredSlotsIncluded")}>
                   <StateIcon size={18} state="deferred" style={{ display: "inline", marginLeft: 6 }} />
+                </Tooltip>
+              ) : undefined}
+              {pool.allow_overrides ? (
+                <Tooltip content={translate("pools.overrideTargetHelp")}>
+                  <Badge colorPalette="purple" ml={2} variant="subtle">
+                    {translate("pools.overrideTarget")}
+                  </Badge>
                 </Tooltip>
               ) : undefined}
             </Text>

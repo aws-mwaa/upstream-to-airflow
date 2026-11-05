@@ -29,6 +29,7 @@ import { TeamSelector } from "src/components/TeamSelector.tsx";
 import { useConfig } from "src/queries/useConfig.tsx";
 
 export type PoolBody = {
+  allow_overrides: boolean;
   description: string | undefined;
   include_deferred: boolean;
   name: string;
@@ -142,6 +143,19 @@ const PoolForm = ({ error, initialPool, isPending, manageMutate, setError }: Poo
             <Field.Label fontSize="md">{translate("pools.form.includeDeferred")}</Field.Label>
             <Checkbox checked={field.value} onChange={field.onChange}>
               {translate("pools.form.checkbox")}
+            </Checkbox>
+          </Field.Root>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="allow_overrides"
+        render={({ field }) => (
+          <Field.Root mb={4} mt={4}>
+            <Field.Label fontSize="md">{translate("pools.form.allowOverrides")}</Field.Label>
+            <Checkbox checked={field.value} onChange={field.onChange}>
+              {translate("pools.form.allowOverridesCheckbox")}
             </Checkbox>
           </Field.Root>
         )}
