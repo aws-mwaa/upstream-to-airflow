@@ -17,11 +17,13 @@
 # under the License.
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from botocore.exceptions import ClientError
 
+from airflow.exceptions import AirflowProviderDeprecationWarning
 from airflow.providers.amazon.aws.hooks.neptune import NeptuneHook
 from airflow.providers.amazon.aws.operators.base_aws import AwsBaseOperator
 from airflow.providers.amazon.aws.triggers.neptune import (
@@ -82,7 +84,34 @@ def handle_waitable_exception(
             operator.hook.wait_for_cluster_availability(operator.db_cluster_id)
 
 
-class NeptuneStartDbClusterOperator(AwsBaseOperator[NeptuneHook]):
+class _DeprecatedClusterIdMixin:
+    """Keep ``cluster_id`` working as a deprecated alias of ``db_cluster_id``."""
+
+    db_cluster_id: str
+
+    def _warn_cluster_id_deprecated(self) -> None:
+        # Attributed to this module instead of the caller: Airflow only shows DeprecationWarning for
+        # ``airflow*`` modules, so a warning attributed to a subclass in user code would be dropped.
+        warnings.warn(
+            f"`{type(self).__name__}.cluster_id` is deprecated and will be removed in version 10.0.0 "
+            "of the Amazon provider. Use `db_cluster_id` instead.",
+            AirflowProviderDeprecationWarning,
+            stacklevel=1,
+        )
+
+    @property
+    def cluster_id(self) -> str:
+        """Deprecated alias of ``db_cluster_id``."""
+        self._warn_cluster_id_deprecated()
+        return self.db_cluster_id
+
+    @cluster_id.setter
+    def cluster_id(self, value: str) -> None:
+        self._warn_cluster_id_deprecated()
+        self.db_cluster_id = value
+
+
+class NeptuneStartDbClusterOperator(_DeprecatedClusterIdMixin, AwsBaseOperator[NeptuneHook]):
     """
     Starts an Amazon Neptune DB cluster.
 
@@ -205,7 +234,7 @@ class NeptuneStartDbClusterOperator(AwsBaseOperator[NeptuneHook]):
         return {"db_cluster_id": cluster_id}
 
 
-class NeptuneStopDbClusterOperator(AwsBaseOperator[NeptuneHook]):
+class NeptuneStopDbClusterOperator(_DeprecatedClusterIdMixin, AwsBaseOperator[NeptuneHook]):
     """
     Stops an Amazon Neptune DB cluster.
 

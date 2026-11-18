@@ -17,6 +17,8 @@
 # under the License.
 from __future__ import annotations
 
+import re
+import warnings
 from collections.abc import Generator
 from unittest import mock
 
@@ -24,7 +26,9 @@ import pytest
 from boto3 import client
 from moto import mock_aws
 
+from airflow.exceptions import AirflowProviderDeprecationWarning
 from airflow.providers.amazon.aws.hooks.neptune import NeptuneHook
+from airflow.providers.amazon.aws.operators import neptune as neptune_operators
 from airflow.providers.amazon.aws.operators.neptune import (
     NeptuneStartDbClusterOperator,
     NeptuneStopDbClusterOperator,
@@ -98,6 +102,47 @@ def test_deferred_trigger_receives_the_operator_configuration(mock_conn, operato
         "waiter_delay": WAITER_DELAY,
         "waiter_max_attempts": WAITER_MAX_ATTEMPTS,
     }
+
+
+def _cluster_id_deprecation_message(operator_class) -> str:
+    return re.escape(
+        f"`{operator_class.__name__}.cluster_id` is deprecated and will be removed in version 10.0.0 "
+        "of the Amazon provider. Use `db_cluster_id` instead."
+    )
+
+
+@pytest.mark.parametrize("operator_class", [NeptuneStartDbClusterOperator, NeptuneStopDbClusterOperator])
+class TestDeprecatedClusterIdAlias:
+    def test_reading_cluster_id_returns_db_cluster_id(self, operator_class):
+        operator = operator_class(task_id="task_test", db_cluster_id=CLUSTER_ID)
+
+        with pytest.warns(
+            AirflowProviderDeprecationWarning, match=_cluster_id_deprecation_message(operator_class)
+        ):
+            assert operator.cluster_id == CLUSTER_ID
+        assert "cluster_id" not in operator.template_fields
+
+    def test_assigning_cluster_id_updates_db_cluster_id(self, operator_class):
+        operator = operator_class(task_id="task_test", db_cluster_id=CLUSTER_ID)
+
+        with pytest.warns(
+            AirflowProviderDeprecationWarning, match=_cluster_id_deprecation_message(operator_class)
+        ):
+            operator.cluster_id = "x"
+
+        assert operator.db_cluster_id == "x"
+
+
+def test_cluster_id_deprecation_is_attributed_to_the_operator_module():
+    operator = NeptuneStartDbClusterOperator(task_id="task_test", db_cluster_id=CLUSTER_ID)
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        operator.cluster_id = operator.cluster_id
+
+    assert [(w.category, w.filename) for w in recorded] == [
+        (AirflowProviderDeprecationWarning, neptune_operators.__file__)
+    ] * 2
 
 
 class TestNeptuneStartClusterOperator:
