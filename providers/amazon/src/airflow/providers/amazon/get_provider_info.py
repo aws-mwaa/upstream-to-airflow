@@ -1336,6 +1336,13 @@ def get_provider_info():
                         "example": "bucket-owner-full-control",
                         "default": None,
                     },
+                    "use_10_0_return_values": {
+                        "description": "Whether the operators whose return value changes in version 10.0.0 of the Amazon provider\nalready return the 10.0.0 value.\n\nWhile this is ``False``, those operators return the same value as before and emit a\ndeprecation warning when the task pushes it to XCom. Set it to ``True`` once everything that\nreads those XComs handles the new values, which also silences the warnings.\n\nThe option is read in the task process, so set it wherever tasks run: every worker, pod and\nexecutor image. Otherwise the same task returns different values depending on where it runs.\n\nVersion 10.0.0 always returns the new values and no longer reads this option.\n",
+                        "type": "boolean",
+                        "version_added": "9.41.0",
+                        "example": None,
+                        "default": "False",
+                    },
                 },
             },
             "aws_batch_executor": {

@@ -1241,6 +1241,23 @@ config:
         version_added: 9.34.0
         example: bucket-owner-full-control
         default: ~
+      use_10_0_return_values:
+        description: |
+          Whether the operators whose return value changes in version 10.0.0 of the Amazon provider
+          already return the 10.0.0 value.
+
+          While this is ``False``, those operators return the same value as before and emit a
+          deprecation warning when the task pushes it to XCom. Set it to ``True`` once everything that
+          reads those XComs handles the new values, which also silences the warnings.
+
+          The option is read in the task process, so set it wherever tasks run: every worker, pod and
+          executor image. Otherwise the same task returns different values depending on where it runs.
+
+          Version 10.0.0 always returns the new values and no longer reads this option.
+        type: boolean
+        version_added: 9.41.0
+        example: ~
+        default: "False"
   aws_batch_executor:
     description: |
       This section only applies if you are using the AwsBatchExecutor in
