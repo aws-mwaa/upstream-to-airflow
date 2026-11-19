@@ -23,6 +23,7 @@
 
 - [AIP-117 proof of concept: demo](#aip-117-proof-of-concept-demo)
   - [What this branch implements](#what-this-branch-implements)
+  - [Where `dag.param()` differs on these fields](#where-dagparam-differs-on-these-fields)
   - [Not in this branch](#not-in-this-branch)
   - [Running the demo](#running-the-demo)
 
@@ -37,10 +38,26 @@ towards pools and queues an administrator nominated.
 
 ## What this branch implements
 
-- `Lookup.param()`, `Lookup.run_type()` and `.map()` on the four fields, in task arguments and in
-  Dag or TaskGroup `default_args`. The Dag processor rejects a param without `enum` (or `minimum`
-  and `maximum` for the integer fields), an unknown param, and `Lookup.run_type()` without
-  `default=`. Reading `task.pool` while parsing gives the value a run without conf would get.
+- The four fields accept the existing `dag.param(name)` or the new helper
+  `by_run_type(**values, default=...)` from `airflow.sdk`, in task arguments, in `.partial()` and
+  in Dag or TaskGroup `default_args`. There is no new class in the public API.
+
+  ```python
+  with DAG(
+      "regional_sync",
+      params={"warehouse_pool": Param("wh_small", enum=["wh_small", "wh_large"])},
+  ) as dag:
+      dag.default_args["pool"] = dag.param("warehouse_pool")  # tasks created after this line
+      load = LoadOperator(task_id="load", pool=dag.param("warehouse_pool"))
+      merge = MergeOperator(task_id="merge", pool=by_run_type(backfill="backfill_pool", default="etl_pool"))
+      fan = FanOperator.partial(task_id="fan", pool=dag.param("warehouse_pool")).expand(x=[1, 2, 3])
+  ```
+
+- The Dag processor rejects a param that the Dag does not declare, a param without a string `enum`
+  or `const` (for `pool` and `queue`) or without an integer `enum` or type `integer` with `minimum`
+  and `maximum` (for `pool_slots` and `priority_weight`), an unknown run type, and `by_run_type()`
+  without `default=`. Reading `task.pool` while parsing gives the value a run without conf would
+  get, and `dag.params["x"]` still gives the param's default.
 - An `overrides` field on `POST /api/v2/dags/{dag_id}/dagRuns` and
   `POST /api/v2/assets/{asset_id}/materialize`: `tasks` keyed by task or TaskGroup ID, and `pools`
   to move every task of the run off one pool. It needs Dag edit permission, a pool with
@@ -57,12 +74,28 @@ towards pools and queues an administrator nominated.
 - A migration adding `dag_run.scheduling_overrides` (deferred JSON), `dag_run.has_scheduling_overrides`
   and `slot_pool.allow_overrides`.
 
+## Where `dag.param()` differs on these fields
+
+- On a templated field, `dag.param("x")` is resolved on the worker by `DagParam.resolve()`, which
+  reads the unvalidated `dag_run.conf`. On these four fields the scheduler reads the run's params
+  after conf is merged and validated, so the same expression has two resolution paths.
+- `dag.param()` needs the Dag object, so it cannot go in the `default_args` passed to `DAG(...)` or
+  `@dag(...)`. Set `dag.default_args["pool"]` inside the `with` block; it applies to tasks created
+  after that line. `by_run_type()` works in both places.
+- Inside an `@dag` function the arguments are already `DagParam` objects, so `pool=warehouse_pool`
+  works when `params` declares the bound. The argument's default replaces the one in `params`.
+- `dag.param("x", default)` writes `default` into the Dag's param, for every task and for the
+  trigger form. Two calls with different defaults are rejected for these fields, because a run
+  without conf can only get one of them.
+- Only the Dag-level param counts. A task-level `params={"x": ...}` does not change these fields.
+
 ## Not in this branch
 
-`Lookup.variable()`; Lookups inside `.partial()` (overrides do reach mapped tasks); "sets pool for N
-tasks" notes under Lookup params in the trigger form; showing where a value came from on the task
-instance page; a Dag warning and fallback when a scheduled run's Lookup names a missing pool; the
-`queue_to_coordinator` runtime check; docs.
+An Airflow Variable as a source; translating one param into several fields (the earlier `.map()`);
+"sets pool for N tasks" notes under these params in the trigger form; showing where a value came
+from on the task instance page; a Dag warning and fallback when a scheduled run's value names a
+missing pool; rejecting `by_run_type()` on other fields; the `queue_to_coordinator` runtime check;
+docs.
 
 ## Running the demo
 
@@ -78,7 +111,8 @@ breeze start-airflow
 | Capacity at trigger time | Trigger `aip117_regional_sync` from the UI | The `warehouse_pool` dropdown comes from the enum param |
 | | `demo.sh trigger-small`, then `trigger-large` | Pools page: `wh_small` runs 2 of 18, `wh_large` runs 16 |
 | Bounded choice | `demo.sh trigger-bad-conf` | A value outside the enum is a 400 |
-| Bounded at parse time | `cp dev/aip117_demo/unbounded_param.py files/dags/` | Import error: the param must declare `enum` |
+| Bounded at parse time | `cp dev/aip117_demo/unbounded_param.py files/dags/` | Import error: the param must declare `enum` or `const` |
+| Mapped tasks | `demo.sh trigger-fan`, then `demo.sh tis aip117_fan_out` | All three mapped task instances of `fan` use `wh_large` |
 | Backfill isolation | `demo.sh backfill`, then `demo.sh pools-by-run` | Backfill runs use `backfill_pool`, the scheduled run `etl_pool` |
 | Override needs nomination | `demo.sh override`, `demo.sh override-unknown` | Same 400 for an unnominated and a missing pool |
 | | `demo.sh nominate`, or tick *Allow Overrides* when editing `heavy_pool` | The pool card gets an *Override target* badge |

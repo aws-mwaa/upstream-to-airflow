@@ -63,7 +63,7 @@ from airflow.sdk.definitions._internal.node import validate_key
 from airflow.sdk.definitions._internal.setup_teardown import SetupTeardownContext
 from airflow.sdk.definitions._internal.types import NOTSET, validate_instance_args
 from airflow.sdk.definitions.edges import EdgeModifier
-from airflow.sdk.definitions.lookup import Lookup, reject_lookups_in_partial
+from airflow.sdk.definitions.lookup import split_lookup, take_lookups
 from airflow.sdk.definitions.mappedoperator import OperatorPartial, validate_mapping_kwargs
 from airflow.sdk.definitions.param import ParamsDict
 from airflow.sdk.exceptions import RemovedInAirflow4Warning
@@ -94,7 +94,9 @@ if TYPE_CHECKING:
     from airflow.sdk.bases.operatorlink import BaseOperatorLink
     from airflow.sdk.definitions.context import Context
     from airflow.sdk.definitions.dag import DAG
+    from airflow.sdk.definitions.lookup import ParamLookup, RunTypeLookup
     from airflow.sdk.definitions.operator_resources import Resources
+    from airflow.sdk.definitions.param import DagParam
     from airflow.sdk.definitions.retry_policy import RetryPolicy
     from airflow.sdk.definitions.taskgroup import TaskGroup
     from airflow.sdk.definitions.xcom_arg import XComArg
@@ -313,14 +315,14 @@ if TYPE_CHECKING:
         wait_for_past_depends_before_skipping: bool = ...,
         wait_for_downstream: bool = ...,
         retries: int | None = ...,
-        queue: str = ...,
-        pool: str = ...,
-        pool_slots: int = ...,
+        queue: str | DagParam | RunTypeLookup = ...,
+        pool: str | DagParam | RunTypeLookup = ...,
+        pool_slots: int | DagParam | RunTypeLookup = ...,
         execution_timeout: timedelta | None = ...,
         max_retry_delay: None | timedelta | float = ...,
         retry_delay: timedelta | float = ...,
         retry_exponential_backoff: float = ...,
-        priority_weight: int = ...,
+        priority_weight: int | DagParam | RunTypeLookup = ...,
         weight_rule: WeightRuleParam = ...,
         sla: timedelta | None = ...,
         map_index_template: str | None = ...,
@@ -404,7 +406,7 @@ else:
             partial_kwargs["start_date"] = timezone.convert_to_utc(start_date)
         if end_date := partial_kwargs.get("end_date", None):
             partial_kwargs["end_date"] = timezone.convert_to_utc(end_date)
-        reject_lookups_in_partial(partial_kwargs, task_id)
+        scheduling_lookups = take_lookups(partial_kwargs, task_id)
         if partial_kwargs["pool_slots"] < 1:
             dag_str = ""
             if dag:
@@ -424,6 +426,7 @@ else:
             operator_class=operator_class,
             kwargs=partial_kwargs,
             params=partial_params,
+            scheduling_lookups=scheduling_lookups,
         )
 
 
@@ -1072,11 +1075,11 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         dag: DAG | None = None,
         params: collections.abc.MutableMapping[str, Any] | None = None,
         default_args: dict | None = None,
-        priority_weight: int | Lookup = DEFAULT_PRIORITY_WEIGHT,
+        priority_weight: int | DagParam | RunTypeLookup = DEFAULT_PRIORITY_WEIGHT,
         weight_rule: WeightRuleParam = DEFAULT_WEIGHT_RULE,
-        queue: str | Lookup = DEFAULT_QUEUE,
-        pool: str | Lookup | None = None,
-        pool_slots: int | Lookup = DEFAULT_POOL_SLOTS,
+        queue: str | DagParam | RunTypeLookup = DEFAULT_QUEUE,
+        pool: str | DagParam | RunTypeLookup | None = None,
+        pool_slots: int | DagParam | RunTypeLookup = DEFAULT_POOL_SLOTS,
         sla: timedelta | None = None,
         execution_timeout: timedelta | None = DEFAULT_TASK_EXECUTION_TIMEOUT,
         on_execute_callback: None | TaskStateChangeCallback | Collection[TaskStateChangeCallback] = None,
@@ -1177,10 +1180,10 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         # TODO:
         # self.retries = parse_retries(retries)
         self.retries = retries
-        self.scheduling_lookups: dict[str, Lookup] = {}
-        self.queue = self._take_lookup("queue", queue, dag)
-        self.pool = DEFAULT_POOL_NAME if pool is None else self._take_lookup("pool", pool, dag)
-        self.pool_slots = self._take_lookup("pool_slots", pool_slots, dag)
+        self.scheduling_lookups: dict[str, ParamLookup | RunTypeLookup] = {}
+        self.queue = self._take_lookup("queue", queue)
+        self.pool = DEFAULT_POOL_NAME if pool is None else self._take_lookup("pool", pool)
+        self.pool_slots = self._take_lookup("pool_slots", pool_slots)
         if self.pool_slots < 1:
             dag_str = f" in dag {dag.dag_id}" if dag else ""
             raise ValueError(f"pool slots for {self.task_id}{dag_str} cannot be less than 1")
@@ -1218,7 +1221,7 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
 
         self.params = ParamsDict(params)
 
-        self.priority_weight = self._take_lookup("priority_weight", priority_weight, dag)
+        self.priority_weight = self._take_lookup("priority_weight", priority_weight)
         self.weight_rule = weight_rule
 
         self.max_active_tis_per_dag: int | None = max_active_tis_per_dag
@@ -1271,12 +1274,12 @@ class BaseOperator(AbstractOperator, metaclass=BaseOperatorMeta):
         # Ensure priority_weight is within the valid range
         self.priority_weight = db_safe_priority(self.priority_weight)
 
-    def _take_lookup(self, field: str, value: Any, dag: DAG | None) -> Any:
-        """Keep a Lookup aside and return the plain value the field holds while the Dag is parsed."""
-        if not isinstance(value, Lookup):
-            return value
-        self.scheduling_lookups[field] = value
-        return value.get_parse_time_value(field, dag)
+    def _take_lookup(self, field: str, value: Any) -> Any:
+        """Keep ``dag.param()`` or ``by_run_type()`` aside and return the field's parse-time value."""
+        lookup, plain = split_lookup(field, value, self.task_id)
+        if lookup is not None:
+            self.scheduling_lookups[field] = lookup
+        return plain
 
     def __eq__(self, other):
         if type(self) is type(other):

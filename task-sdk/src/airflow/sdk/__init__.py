@@ -66,7 +66,6 @@ __all__ = [
     "IdentityMapper",
     "Label",
     "LoopDecision",
-    "Lookup",
     "Metadata",
     "MinimumCount",
     "MonthWindow",
@@ -108,6 +107,7 @@ __all__ = [
     "XComArg",
     "YearWindow",
     "asset",
+    "by_run_type",
     "chain",
     "chain_linear",
     "conf",
@@ -177,7 +177,7 @@ if TYPE_CHECKING:
     from airflow.sdk.definitions.decorators import result, setup, task, teardown
     from airflow.sdk.definitions.decorators.task_group import task_group
     from airflow.sdk.definitions.edges import EdgeModifier, Label
-    from airflow.sdk.definitions.lookup import Lookup
+    from airflow.sdk.definitions.lookup import by_run_type
     from airflow.sdk.definitions.loop import LoopDecision
     from airflow.sdk.definitions.param import Param, ParamsDict
     from airflow.sdk.definitions.partition_mappers.allowed_key import AllowedKeyMapper
@@ -299,7 +299,6 @@ __lazy_imports: dict[str, tuple[str, str]] = {
     "IdentityMapper": (".definitions.partition_mappers.identity", "IdentityMapper"),
     "Label": (".definitions.edges", "Label"),
     "LoopDecision": (".definitions.loop", "LoopDecision"),
-    "Lookup": (".definitions.lookup", "Lookup"),
     "Metadata": (".definitions.asset.metadata", "Metadata"),
     "MinimumCount": (".definitions.partition_mappers.wait_policy", "MinimumCount"),
     "MonthWindow": (".definitions.partition_mappers.window", "MonthWindow"),
@@ -341,6 +340,7 @@ __lazy_imports: dict[str, tuple[str, str]] = {
     "XComArg": (".definitions.xcom_arg", "XComArg"),
     "YearWindow": (".definitions.partition_mappers.window", "YearWindow"),
     "asset": (".definitions.asset.decorators", "asset"),
+    "by_run_type": (".definitions.lookup", "by_run_type"),
     "chain": (".bases.operator", "chain"),
     "chain_linear": (".bases.operator", "chain_linear"),
     "conf": (".configuration", "conf"),

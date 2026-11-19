@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from airflow.sdk.definitions._internal.node import DAGNode as TaskSDKDAGNode
     from airflow.sdk.definitions.operator_resources import Resources
     from airflow.serialization.definitions.dag import SerializedDAG
+    from airflow.serialization.definitions.lookup import SerializedLookup
     from airflow.task.trigger_rule import TriggerRule
     from airflow.ti_deps.deps.base_ti_dep import BaseTIDep
     from airflow.triggers.base import StartTriggerArgs
@@ -108,6 +109,7 @@ class SerializedMappedOperator(DAGNode):
     _is_sensor: bool = attrs.field(alias="is_sensor", default=False)
     is_stub: bool = attrs.field(init=False, default=False)
     _arg_bindings: list[dict[str, Any]] | None = attrs.field(alias="arg_bindings", init=False, default=None)
+    scheduling_lookups: Mapping[str, SerializedLookup] = attrs.field(init=False, factory=dict)
     _task_module: str
     task_type: str
     _operator_name: str

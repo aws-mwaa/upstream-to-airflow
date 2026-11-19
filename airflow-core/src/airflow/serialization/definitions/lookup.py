@@ -52,7 +52,7 @@ class SerializedLookup:
     A decoded Lookup the scheduler and API server can resolve without importing Dag code.
 
     ``sources`` holds ``("param", name)`` or ``("run_type", {run_type: value})`` pairs, tried in
-    order. The encoded form is written by ``airflow.sdk.Lookup.serialize()``.
+    order. The encoded form is written by ``airflow.sdk.definitions.lookup``.
     """
 
     sources: tuple[tuple[str, Any], ...]

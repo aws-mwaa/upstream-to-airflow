@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import copy
 import re
 import weakref
 from collections import deque
@@ -31,6 +30,7 @@ import attrs
 from airflow.sdk import TriggerRule
 from airflow.sdk._shared.dagnode.node import TaskGroupMixin
 from airflow.sdk.definitions._internal.node import DAGNode, validate_group_key
+from airflow.sdk.definitions.lookup import deepcopy_default_args
 from airflow.sdk.exceptions import (
     DuplicateTaskIdFound,
     NodeNotFound,
@@ -135,7 +135,7 @@ class TaskGroup(TaskGroupMixin, DAGNode):
     prefix_group_id: bool = attrs.field(default=True)
     parent_group: TaskGroup | None = attrs.field(factory=_default_parent_group)
     dag: DAG = attrs.field(default=attrs.Factory(_default_dag, takes_self=True))
-    default_args: dict[str, Any] = attrs.field(factory=dict, converter=copy.deepcopy)
+    default_args: dict[str, Any] = attrs.field(factory=dict, converter=deepcopy_default_args)
     tooltip: str = attrs.field(default="", validator=attrs.validators.instance_of(str))
     doc_md: str | None = attrs.field(default=None, converter=_convert_doc_md)
     children: dict[str, DAGNode] = attrs.field(factory=dict, init=False)

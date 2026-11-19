@@ -26,7 +26,7 @@ from airflow.models.pool import Pool
 from airflow.models.run_scheduling import SchedulingValueRejected
 from airflow.models.taskinstance import TaskInstance as TI, clear_task_instances
 from airflow.providers.standard.operators.empty import EmptyOperator
-from airflow.sdk import Lookup, Param, TaskGroup
+from airflow.sdk import Param, TaskGroup, by_run_type, task
 from airflow.settings import get_policy_plugin_manager
 from airflow.utils.types import DagRunType
 
@@ -36,7 +36,9 @@ from tests_common.test_utils.mock_operators import MockOperator
 
 pytestmark = pytest.mark.db_test
 
-POOL_PARAMS = {"warehouse_pool": Param("wh_small", enum=["wh_small", "wh_large"])}
+
+def pool_params() -> dict[str, Param]:
+    return {"warehouse_pool": Param("wh_small", enum=["wh_small", "wh_large"])}
 
 
 @pytest.fixture(autouse=True)
@@ -78,14 +80,14 @@ def hook_is_noop(request, monkeypatch):
 @pytest.mark.usefixtures("pools", "hook_is_noop")
 class TestLookups:
     def test_param_lookup_follows_conf(self, dag_maker, session):
-        with dag_maker("d", params=POOL_PARAMS, session=session):
-            EmptyOperator(task_id="merge", pool=Lookup.param("warehouse_pool"))
+        with dag_maker("d", params=pool_params(), session=session) as dag:
+            EmptyOperator(task_id="merge", pool=dag.param("warehouse_pool"))
         dr = dag_maker.create_dagrun(conf={"warehouse_pool": "wh_large"})
         assert _ti_values(session, dr, "merge")["pool"] == "wh_large"
 
     def test_param_lookup_uses_default_without_conf(self, dag_maker, session):
-        with dag_maker("d", params=POOL_PARAMS, session=session):
-            EmptyOperator(task_id="merge", pool=Lookup.param("warehouse_pool"))
+        with dag_maker("d", params=pool_params(), session=session) as dag:
+            EmptyOperator(task_id="merge", pool=dag.param("warehouse_pool"))
         dr = dag_maker.create_dagrun(run_type=DagRunType.SCHEDULED)
         assert _ti_values(session, dr, "merge")["pool"] == "wh_small"
 
@@ -95,20 +97,23 @@ class TestLookups:
     )
     def test_run_type_lookup(self, dag_maker, session, run_type, expected):
         with dag_maker("d", session=session):
-            EmptyOperator(task_id="load", pool=Lookup.run_type({"backfill": "wh_large"}, default="wh_small"))
+            EmptyOperator(task_id="load", pool=by_run_type(backfill="wh_large", default="wh_small"))
         dr = dag_maker.create_dagrun(run_type=run_type)
         assert _ti_values(session, dr, "load")["pool"] == expected
 
-    def test_map_and_priority_weight_is_absolute(self, dag_maker, session):
-        params = {"size": Param("small", enum=["small", "large"])}
-        with dag_maker("d", params=params, session=session):
+    def test_int_params_and_priority_weight_is_absolute(self, dag_maker, session):
+        params = {
+            "slots": Param(1, enum=[1, 4]),
+            "priority": Param(5, type="integer", minimum=1, maximum=100),
+        }
+        with dag_maker("d", params=params, session=session) as dag:
             first = EmptyOperator(
                 task_id="first",
-                pool_slots=Lookup.param("size").map({"small": 1, "large": 4}),
-                priority_weight=Lookup.param("size").map({"small": 5, "large": 50}),
+                pool_slots=dag.param("slots"),
+                priority_weight=dag.param("priority"),
             )
             first >> EmptyOperator(task_id="second")
-        dr = dag_maker.create_dagrun(conf={"size": "large"})
+        dr = dag_maker.create_dagrun(conf={"slots": 4, "priority": 50})
         # weight_rule=downstream would add the downstream task's weight; a looked-up weight replaces it.
         assert _ti_values(session, dr, "first") | {"pool": None} == {
             "pool": None,
@@ -119,22 +124,57 @@ class TestLookups:
 
     def test_request_with_unknown_lookup_pool_is_rejected(self, dag_maker, session):
         params = {"p": Param("wh_small", enum=["wh_small", "nowhere"])}
-        with dag_maker("d", params=params, session=session):
-            EmptyOperator(task_id="t", pool=Lookup.param("p"))
+        with dag_maker("d", params=params, session=session) as dag:
+            EmptyOperator(task_id="t", pool=dag.param("p"))
         with pytest.raises(SchedulingValueRejected, match="pool='nowhere' cannot be used"):
             dag_maker.create_dagrun(conf={"p": "nowhere"})
 
     def test_scheduled_run_with_unknown_lookup_pool_is_not_rejected(self, dag_maker, session):
         with dag_maker("d", session=session):
-            EmptyOperator(task_id="t", pool=Lookup.run_type({"scheduled": "nowhere"}, default="wh_small"))
+            EmptyOperator(task_id="t", pool=by_run_type(scheduled="nowhere", default="wh_small"))
         dag_maker.create_dagrun(run_type=DagRunType.SCHEDULED)
 
     def test_request_with_pool_slots_above_pool_is_rejected(self, dag_maker, session):
         params = {"n": Param(1, type="integer", minimum=1, maximum=8)}
-        with dag_maker("d", params=params, session=session):
-            EmptyOperator(task_id="t", pool="wh_small", pool_slots=Lookup.param("n"))
+        with dag_maker("d", params=params, session=session) as dag:
+            EmptyOperator(task_id="t", pool="wh_small", pool_slots=dag.param("n"))
         with pytest.raises(SchedulingValueRejected, match="pool_slots=3"):
             dag_maker.create_dagrun(conf={"n": 3})
+
+    @pytest.mark.parametrize(
+        ("conf", "expected"), [({"warehouse_pool": "wh_large"}, "wh_large"), (None, "wh_small")]
+    )
+    def test_mapped_task_instances_get_param_value(self, dag_maker, session, conf, expected):
+        with dag_maker("d", params=pool_params(), session=session) as dag:
+            MockOperator.partial(task_id="mapped", pool=dag.param("warehouse_pool")).expand(arg2=[1, 2, 3])
+        dr = dag_maker.create_dagrun(conf=conf)
+        dr.task_instance_scheduling_decisions(session=session)
+        session.flush()
+        pools = session.scalars(select(TI.pool).where(TI.run_id == dr.run_id, TI.task_id == "mapped")).all()
+        assert pools == [expected] * 3
+
+    def test_mapped_decorated_task_instances_get_run_type_value(self, dag_maker, session):
+        with dag_maker("d", session=session):
+
+            @task(pool=by_run_type(backfill="wh_large", default="wh_small"))
+            def work(x):
+                pass
+
+            work.expand(x=[1, 2, 3])
+        dr = dag_maker.create_dagrun(run_type=DagRunType.BACKFILL_JOB)
+        dr.task_instance_scheduling_decisions(session=session)
+        session.flush()
+        pools = session.scalars(select(TI.pool).where(TI.run_id == dr.run_id, TI.task_id == "work")).all()
+        assert pools == ["wh_large"] * 3
+
+    def test_dag_default_args_reach_tasks_created_after(self, dag_maker, session):
+        with dag_maker("d", params=pool_params(), session=session) as dag:
+            EmptyOperator(task_id="before")
+            dag.default_args["pool"] = dag.param("warehouse_pool")
+            EmptyOperator(task_id="after")
+        dr = dag_maker.create_dagrun(conf={"warehouse_pool": "wh_large"})
+        assert _ti_values(session, dr, "before")["pool"] == "default_pool"
+        assert _ti_values(session, dr, "after")["pool"] == "wh_large"
 
 
 @pytest.mark.usefixtures("pools", "hook_is_noop")
@@ -159,9 +199,9 @@ class TestOverrides:
         assert _ti_values(session, dr, "transform.b")["pool_slots"] == 2
 
     def test_pools_remap_moves_lookup_and_declared_pools(self, dag_maker, session):
-        with dag_maker("d", params=POOL_PARAMS, session=session):
+        with dag_maker("d", params=pool_params(), session=session) as dag:
             EmptyOperator(task_id="declared", pool="wh_small")
-            EmptyOperator(task_id="looked_up", pool=Lookup.param("warehouse_pool"))
+            EmptyOperator(task_id="looked_up", pool=dag.param("warehouse_pool"))
             EmptyOperator(task_id="other", pool="wh_large")
         dr = dag_maker.create_dagrun(scheduling_overrides={"pools": {"wh_small": "overflow"}})
         assert _ti_values(session, dr, "declared")["pool"] == "overflow"

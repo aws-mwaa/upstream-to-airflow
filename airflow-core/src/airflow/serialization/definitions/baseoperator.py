@@ -124,7 +124,8 @@ class SerializedBaseOperator(DAGNode):
     pool_slots: int = 1
     priority_weight: int = 1
     queue: str = "default"
-    # Set per instance when the Dag author used a Lookup; the plain fields above hold its fallback.
+    # Set per instance when the Dag author used dag.param() or by_run_type(); the plain fields
+    # above hold the fallback.
     scheduling_lookups: Mapping[str, SerializedLookup] = {}
 
     render_template_as_native_obj: bool | None = None

@@ -49,6 +49,7 @@ from airflow.sdk.definitions._internal.types import NOTSET, ArgNotSet, is_arg_se
 from airflow.sdk.definitions.asset import AssetAll, BaseAsset
 from airflow.sdk.definitions.context import Context
 from airflow.sdk.definitions.deadline import DeadlineAlert
+from airflow.sdk.definitions.lookup import LOOKUP_FIELDS, as_lookup, split_lookup
 from airflow.sdk.definitions.param import DagParam, ParamsDict
 from airflow.sdk.definitions.timetables.assets import AssetTriggeredTimetable
 from airflow.sdk.definitions.timetables.simple import ContinuousTimetable, NullTimetable, OnceTimetable
@@ -795,17 +796,39 @@ class DAG:
 
     def validate_scheduling_lookups(self):
         """
-        Check each task's Lookups against the Dag's params.
+        Check each ``dag.param()`` used for a task's pool, pool_slots, priority_weight or queue.
 
-        A task created before it joined the Dag could not read the param defaults, so its plain
-        field values are set again here, before cluster policies see them.
+        ``dag.param(name, default)`` can change a param's default after a task read it, so the
+        plain field values are set again here, before cluster policies see them.
 
         :meta private:
         """
         for task in self.tasks:
-            for field, lookup in getattr(task, "scheduling_lookups", {}).items():
+            lookups = task.scheduling_lookups
+            for field in LOOKUP_FIELDS:
+                # Assigned after the task was created, for example ``task.pool = dag.param("x")``.
+                lookup, _ = split_lookup(field, getattr(task, field), task.task_id)
+                if lookup is not None:
+                    lookups[field] = lookup
+            for field, lookup in lookups.items():
                 lookup.validate_for(field, task.task_id, self)
                 setattr(task, field, lookup.get_parse_time_value(field, self))
+
+    def get_plain_scheduling_default_args(self) -> dict[str, Any]:
+        """
+        Return the parse-time value of each ``dag.param()`` or ``by_run_type()`` in ``default_args``.
+
+        The serialized Dag stores these instead of the object: a ``DagParam`` has no serializer, so
+        it would be written as ``str(obj)`` with a memory address, giving a new Dag version on
+        every parse.
+
+        :meta private:
+        """
+        return {
+            field: lookup.get_parse_time_value(field, self)
+            for field in LOOKUP_FIELDS
+            if (lookup := as_lookup(self.default_args.get(field))) is not None
+        }
 
     def validate_setup_teardown(self):
         """

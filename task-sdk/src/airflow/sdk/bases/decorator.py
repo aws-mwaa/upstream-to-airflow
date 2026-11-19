@@ -49,12 +49,13 @@ from airflow.sdk.definitions._internal.loop import LoopTaskGroup, check_dag_resu
 from airflow.sdk.definitions._internal.types import NOTSET
 from airflow.sdk.definitions.asset import Asset
 from airflow.sdk.definitions.context import KNOWN_CONTEXT_KEYS
-from airflow.sdk.definitions.lookup import LOOKUP_FIELDS, Lookup, reject_lookups_in_partial
+from airflow.sdk.definitions.lookup import LOOKUP_FIELDS, RunTypeLookup, take_lookups
 from airflow.sdk.definitions.mappedoperator import (
     MappedOperator,
     ensure_xcomarg_return_value,
     prevent_duplicates,
 )
+from airflow.sdk.definitions.param import DagParam
 from airflow.sdk.definitions.xcom_arg import XComArg
 
 if TYPE_CHECKING:
@@ -555,7 +556,7 @@ class _TaskDecorator(ExpandableFactory, Generic[FParams, FReturn, OperatorSubcla
         for arg_name, expected_type in BASEOPERATOR_ARGS_EXPECTED_TYPES.items():
             if arg_name in self.kwargs:
                 value = self.kwargs[arg_name]
-                if isinstance(value, Lookup) and arg_name in LOOKUP_FIELDS:
+                if arg_name in LOOKUP_FIELDS and isinstance(value, (DagParam, RunTypeLookup)):
                     continue
                 if value is not None and not isinstance(value, expected_type):
                     raise TypeError(
@@ -686,7 +687,7 @@ class _TaskDecorator(ExpandableFactory, Generic[FParams, FReturn, OperatorSubcla
             partial_kwargs["depends_on_past"] = True
         start_date = timezone.convert_to_utc(partial_kwargs.pop("start_date", None))
         end_date = timezone.convert_to_utc(partial_kwargs.pop("end_date", None))
-        reject_lookups_in_partial(partial_kwargs, task_id)
+        scheduling_lookups = take_lookups(partial_kwargs, task_id)
         if "pool_slots" in partial_kwargs:
             if partial_kwargs["pool_slots"] < 1:
                 dag_str = ""
@@ -719,6 +720,7 @@ class _TaskDecorator(ExpandableFactory, Generic[FParams, FReturn, OperatorSubcla
             operator_class=self.operator_class,
             expand_input=EXPAND_INPUT_EMPTY,  # Don't use this; mapped values go to op_kwargs_expand_input.
             partial_kwargs=partial_kwargs,
+            scheduling_lookups=scheduling_lookups,
             task_id=task_id,
             params=partial_params,
             operator_extra_links=self.operator_class.operator_extra_links,

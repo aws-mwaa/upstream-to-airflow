@@ -1269,7 +1269,7 @@ class OperatorSerialization(DAGNode, BaseSerialization):
         # on this path, so anything that is not JSON ``true`` means "not a stub".
         setattr(op, "is_stub", encoded_op.get("is_stub") is True)
         setattr(op, "_arg_bindings", encoded_op.get("_arg_bindings"))
-        if (encoded_lookups := encoded_op.get("scheduling_lookups")) and not op.is_mapped:
+        if encoded_lookups := encoded_op.get("scheduling_lookups"):
             setattr(
                 op,
                 "scheduling_lookups",
@@ -1817,6 +1817,7 @@ class DagSerialization(BaseSerialization):
                         flags_to_remove.append(k)
                 for k in flags_to_remove:
                     del default_args_dict[k]
+                default_args_dict.update(dag.get_plain_scheduling_default_args())
 
             return serialized_dag
         except SerializationError:

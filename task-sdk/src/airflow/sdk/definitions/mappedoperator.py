@@ -64,6 +64,7 @@ if TYPE_CHECKING:
         OperatorExpandArgument,
         OperatorExpandKwargsArgument,
     )
+    from airflow.sdk.definitions.lookup import ParamLookup, RunTypeLookup
     from airflow.sdk.definitions.operator_resources import Resources
     from airflow.sdk.definitions.param import ParamsDict
     from airflow.sdk.definitions.retry_policy import RetryPolicy
@@ -175,6 +176,7 @@ class OperatorPartial:
     operator_class: type[BaseOperator]
     kwargs: dict[str, Any]
     params: ParamsDict | dict
+    scheduling_lookups: dict[str, ParamLookup | RunTypeLookup] = attrs.field(factory=dict)
 
     _expand_called: bool = False  # Set when expand() is called to ease user debugging.
 
@@ -247,6 +249,7 @@ class OperatorPartial:
             operator_class=self.operator_class,
             expand_input=expand_input,
             partial_kwargs=partial_kwargs,
+            scheduling_lookups=self.scheduling_lookups,
             task_id=task_id,
             params=self.params,
             operator_extra_links=self.operator_class.operator_extra_links,
@@ -318,6 +321,9 @@ class MappedOperator(AbstractOperator):
     start_from_trigger: bool
     _needs_expansion: bool = True
     returns_dag_result: bool = False
+    # ``dag.param()`` or ``by_run_type()`` given for pool, pool_slots, priority_weight or queue;
+    # partial_kwargs holds their parse-time values.
+    scheduling_lookups: dict[str, ParamLookup | RunTypeLookup] = attrs.field(factory=dict)
 
     dag: DAG | None
     task_group: TaskGroup | None
@@ -380,6 +386,7 @@ class MappedOperator(AbstractOperator):
             "partial_kwargs",
             "operator_extra_links",
             "is_stub",
+            "scheduling_lookups",
         }
 
     @property

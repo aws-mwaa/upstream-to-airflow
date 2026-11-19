@@ -16,32 +16,33 @@
 # under the License.
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from airflow.sdk import DAG, BaseOperator, Lookup, Param
+from airflow.sdk import DAG, BaseOperator, Param, by_run_type
 from airflow.serialization.definitions.lookup import decode_lookup
 from airflow.serialization.definitions.notset import NOTSET
 from airflow.serialization.enums import Encoding
 from airflow.serialization.serialized_objects import DagSerialization
 
-PARAMS = {"size": Param("small", enum=["small", "large"])}
 
-
-def _serialize(**task_kwargs) -> dict:
-    with DAG("d", schedule=None, params=PARAMS) as dag:
-        BaseOperator(task_id="t", **task_kwargs)
-    return DagSerialization.to_dict(dag)
+def _make_dag() -> DAG:
+    return DAG("d", schedule=None, params={"slots": Param(1, enum=[1, 4])})
 
 
 def test_round_trip():
-    ser = _serialize(
-        pool=Lookup.run_type({"backfill": "bf"}, default="etl"),
-        pool_slots=Lookup.param("size").map({"small": 1, "large": 4}),
-    )
+    with _make_dag() as dag:
+        BaseOperator(
+            task_id="t",
+            pool=by_run_type(backfill="bf", default="etl"),
+            pool_slots=dag.param("slots"),
+        )
+    ser = DagSerialization.to_dict(dag)
     encoded = ser["dag"]["tasks"][0][Encoding.VAR]
     assert encoded["scheduling_lookups"] == {
         "pool": {"sources": [{"kind": "run_type", "mapping": {"backfill": "bf"}}], "default": "etl"},
-        "pool_slots": {"sources": [{"kind": "param", "name": "size"}], "map": [["small", 1], ["large", 4]]},
+        "pool_slots": {"sources": [{"kind": "param", "name": "slots"}]},
     }
     # The plain field holds the value a run without conf gets.
     assert encoded["pool"] == "etl"
@@ -51,12 +52,41 @@ def test_round_trip():
     lookups = task.scheduling_lookups
     assert lookups["pool"].resolve("pool", params={}, run_type="backfill") == "bf"
     assert lookups["pool"].resolve("pool", params={}, run_type="manual") == "etl"
-    assert lookups["pool_slots"].resolve("pool_slots", params={"size": "large"}, run_type="manual") == 4
+    assert lookups["pool_slots"].resolve("pool_slots", params={"slots": 4}, run_type="manual") == 4
+
+
+def test_mapped_operator_round_trip():
+    with _make_dag() as dag:
+        BaseOperator.partial(task_id="t", pool_slots=dag.param("slots")).expand(doc=["a", "b"])
+    ser = DagSerialization.to_dict(dag)
+    encoded = ser["dag"]["tasks"][0][Encoding.VAR]
+    assert encoded["scheduling_lookups"] == {"pool_slots": {"sources": [{"kind": "param", "name": "slots"}]}}
+
+    task = DagSerialization.from_dict(ser).task_dict["t"]
+    assert task.is_mapped
+    assert task.pool_slots == 1
+    assert (
+        task.scheduling_lookups["pool_slots"].resolve("pool_slots", params={"slots": 4}, run_type="manual")
+        == 4
+    )
+
+
+def test_dag_default_args_store_plain_values():
+    with _make_dag() as dag:
+        dag.default_args["pool_slots"] = dag.param("slots")
+        dag.default_args["queue"] = by_run_type(backfill="slow", default="fast")
+        BaseOperator(task_id="t")
+    ser = DagSerialization.to_dict(dag)
+    assert ser["dag"]["default_args"][Encoding.VAR] == {"pool_slots": 1, "queue": "fast"}
+    json.dumps(ser)
 
 
 def test_task_without_lookups_serializes_as_before():
-    encoded = _serialize(pool="p")["dag"]["tasks"][0][Encoding.VAR]
-    assert "scheduling_lookups" not in encoded
+    with _make_dag() as dag:
+        BaseOperator(task_id="t", pool="p")
+        BaseOperator.partial(task_id="mapped", pool="p").expand(doc=["a", "b"])
+    for task in DagSerialization.to_dict(dag)["dag"]["tasks"]:
+        assert "scheduling_lookups" not in task[Encoding.VAR]
 
 
 def test_decode_rejects_unknown_source_kind():

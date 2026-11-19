@@ -49,7 +49,7 @@ setup)
     pool backfill_pool 2 false
     pool heavy_pool 16 false
     pool etl_overflow_pool 16 true
-    for dag in aip117_regional_sync aip117_daily_load aip117_reprocess_orders; do
+    for dag in aip117_regional_sync aip117_daily_load aip117_reprocess_orders aip117_fan_out; do
         call PATCH "/dags/${dag}" '{"is_paused": false}' >/dev/null
     done
     call GET /pools
@@ -58,6 +58,11 @@ trigger-small | trigger-large)
     size=${1#trigger-}
     call POST /dags/aip117_regional_sync/dagRuns \
         "{\"logical_date\": null, \"conf\": {\"warehouse_pool\": \"wh_${size}\"}}"
+    ;;
+trigger-fan)
+    # A mapped task: all of its task instances take the pool from the run's param.
+    call POST /dags/aip117_fan_out/dagRuns \
+        '{"logical_date": null, "conf": {"warehouse_pool": "wh_large"}}'
     ;;
 trigger-bad-conf)
     # Not in the param's enum: rejected like any invalid conf.
@@ -118,7 +123,7 @@ for run, pools in sorted(by_run.items()):
 '
     ;;
 *)
-    echo "usage: $0 setup|trigger-small|trigger-large|trigger-bad-conf|backfill|override|override-unknown|nominate|override-group|remap|tis [dag_id]|pools-by-run [dag_id]" >&2
+    echo "usage: $0 setup|trigger-small|trigger-large|trigger-fan|trigger-bad-conf|backfill|override|override-unknown|nominate|override-group|remap|tis [dag_id]|pools-by-run [dag_id]" >&2
     exit 1
     ;;
 esac

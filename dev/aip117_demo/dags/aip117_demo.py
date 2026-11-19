@@ -21,7 +21,7 @@ from __future__ import annotations
 import datetime
 
 from airflow.providers.standard.operators.bash import BashOperator
-from airflow.sdk import DAG, Lookup, Param, TaskGroup
+from airflow.sdk import DAG, Param, TaskGroup, by_run_type
 
 REGIONS = ["us_east", "us_west", "eu_central", "eu_west", "ap_south", "ap_east"]
 
@@ -35,9 +35,10 @@ with DAG(
             "wh_small", enum=["wh_small", "wh_large"], description="Warehouse capacity for this run"
         ),
     },
-    default_args={"pool": Lookup.param("warehouse_pool")},
     tags=["aip-117"],
-):
+) as dag:
+    # dag.param() needs the Dag, so it is set here and not in the default_args passed to DAG().
+    dag.default_args["pool"] = dag.param("warehouse_pool")
     for region in REGIONS:
         with TaskGroup(region):
             for table in ("orders", "customers", "events"):
@@ -49,13 +50,13 @@ with DAG(
     schedule="@daily",
     start_date=datetime.datetime(2026, 10, 1),
     catchup=False,
-    default_args={"pool": Lookup.run_type({"backfill": "backfill_pool"}, default="etl_pool")},
+    default_args={"pool": by_run_type(backfill="backfill_pool", default="etl_pool")},
     tags=["aip-117"],
 ):
     for i in range(4):
         BashOperator(task_id=f"load_{i}", bash_command="sleep 15")
 
-# 3. A Dag nobody prepared: no lookups, overridden at trigger time.
+# 3. A Dag nobody prepared: plain pools, overridden at trigger time.
 with DAG(
     "aip117_reprocess_orders",
     schedule=None,
@@ -68,3 +69,15 @@ with DAG(
             BashOperator(task_id=f"part_{i}", bash_command="sleep 10", pool="etl_pool")
     load = BashOperator(task_id="load", bash_command="sleep 10", pool="etl_pool")
     extract >> transform >> load
+
+# 4. Mapped tasks: every mapped task instance gets the run's value.
+with DAG(
+    "aip117_fan_out",
+    schedule=None,
+    start_date=datetime.datetime(2026, 1, 1),
+    params={"warehouse_pool": Param("wh_small", enum=["wh_small", "wh_large"])},
+    tags=["aip-117"],
+) as dag:
+    BashOperator.partial(task_id="fan", pool=dag.param("warehouse_pool")).expand(
+        bash_command=["sleep 10", "sleep 11", "sleep 12"]
+    )

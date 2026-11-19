@@ -14,11 +14,18 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Take a task's scheduling fields from a value chosen when a run is created (AIP-117)."""
+"""
+Take a task's scheduling fields from a value chosen when a run is created (AIP-117).
+
+``pool``, ``pool_slots``, ``priority_weight`` and ``queue`` accept ``dag.param(name)`` or
+``by_run_type(...)``. Both are kept on the task as the lookups below, next to the plain value a
+run without conf would get, and the scheduler resolves them when it writes a task instance.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import copy
+from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING, Any
 
 import attrs
@@ -31,11 +38,12 @@ from airflow.sdk.definitions._internal.abstractoperator import (
     DEFAULT_QUEUE,
 )
 from airflow.sdk.definitions._internal.types import NOTSET, ArgNotSet
+from airflow.sdk.definitions.param import DagParam
 
 if TYPE_CHECKING:
     from airflow.sdk.definitions.dag import DAG
 
-__all__ = ["LOOKUP_FIELDS", "Lookup"]
+__all__ = ["LOOKUP_FIELDS", "by_run_type"]
 
 LOOKUP_FIELDS: dict[str, type] = {"pool": str, "pool_slots": int, "priority_weight": int, "queue": str}
 _FIELD_DEFAULTS: dict[str, Any] = {
@@ -47,166 +55,189 @@ _FIELD_DEFAULTS: dict[str, Any] = {
 _RUN_TYPES = frozenset(run_type.value for run_type in DagRunType)
 
 
+def _is_int(value: Any) -> bool:
+    # bool is an int subclass: a boolean param would otherwise become one pool slot.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_usable(field: str, value: Any) -> bool:
+    if LOOKUP_FIELDS[field] is str:
+        return isinstance(value, str) and bool(value)
+    return _is_int(value) and (field != "pool_slots" or value >= 1)
+
+
 @attrs.frozen
-class ParamSource:
-    """Read the value from a Dag param of the run, after conf is merged and validated."""
+class ParamLookup:
+    """
+    What ``dag.param(name)`` becomes on a scheduling field.
+
+    The scheduler reads the value from the run's params, after conf is merged and validated. It
+    never calls ``DagParam.resolve()``, which reads the unvalidated ``dag_run.conf``.
+    """
 
     name: str
-
-
-@attrs.frozen
-class RunTypeSource:
-    """Pick the value by the run's type."""
-
-    mapping: tuple[tuple[str, Any], ...]
-
-
-def _is_field_type(field: str, value: Any) -> bool:
-    expected = LOOKUP_FIELDS[field]
-    # bool is an int subclass: a boolean param would otherwise become one pool slot.
-    return isinstance(value, expected) and not isinstance(value, bool)
-
-
-@attrs.frozen
-class Lookup:
-    """
-    A task's ``pool``, ``pool_slots``, ``priority_weight`` or ``queue``, chosen when a run is created.
-
-    .. code-block:: python
-
-        params = {"warehouse_pool": Param("wh_small", enum=["wh_small", "wh_large"])}
-        MergeOperator(task_id="merge", pool=Lookup.param("warehouse_pool"))
-        LoadOperator(task_id="load", pool=Lookup.run_type({"backfill": "backfill_pool"}, default="etl_pool"))
-
-    Reading the field while the Dag is parsed returns the value a run without conf would get, so
-    ``task_policy`` keeps seeing a plain value.
-    """
-
-    sources: tuple[ParamSource | RunTypeSource, ...]
-    default: Any = NOTSET
-    translation: tuple[tuple[Any, Any], ...] | None = None
+    dag_id: str
+    declared_default: Any = NOTSET
+    """The default given to ``dag.param(name, default)``, which also became the param's default."""
 
     @classmethod
-    def param(cls, name: str, *, default: Any = NOTSET) -> Lookup:
-        """
-        Take the value from the Dag param ``name``.
-
-        The param must declare ``enum``, or ``minimum`` and ``maximum`` for ``pool_slots`` and
-        ``priority_weight``, because anyone who can trigger the Dag can set it.
-
-        :param default: used when the param has no usable value. The param's own default
-            serves when this is not given.
-        """
-        if not isinstance(name, str) or not name:
-            raise ValueError("Lookup.param() needs a param name")
-        return cls(sources=(ParamSource(name),), default=default)
-
-    @classmethod
-    def run_type(cls, mapping: Mapping[str, Any], *, default: Any) -> Lookup:
-        """
-        Pick the value by run type, for example ``{"backfill": "backfill_pool"}``.
-
-        :param default: used for run types not in ``mapping``.
-        """
-        if not mapping:
-            raise ValueError("Lookup.run_type() needs at least one run type")
-        if unknown := set(mapping) - _RUN_TYPES:
-            raise ValueError(
-                f"Lookup.run_type() got unknown run types {sorted(unknown)}; expected some of {sorted(_RUN_TYPES)}"
-            )
-        return cls(sources=(RunTypeSource(tuple(mapping.items())),), default=default)
-
-    def map(self, mapping: Mapping[Any, Any]) -> Lookup:
-        """Translate the looked-up value, for example ``Lookup.param("size").map({"small": 1, "large": 4})``."""
-        if not mapping:
-            raise ValueError("Lookup.map() needs at least one entry")
-        return attrs.evolve(self, translation=tuple(mapping.items()))
+    def from_dag_param(cls, dag_param: DagParam) -> ParamLookup:
+        return cls(
+            name=dag_param._name,
+            dag_id=dag_param.current_dag.dag_id,
+            declared_default=dag_param._default,
+        )
 
     def serialize(self) -> dict[str, Any]:
         """
         Encode for the serialized Dag; ``airflow.serialization.definitions.lookup`` decodes it.
 
         ``sources`` is a list so that later source kinds, or a chain of sources, need no format
-        change. ``map`` is a list of pairs because a param choice may not be a string.
+        change.
         """
-        encoded: dict[str, Any] = {
-            "sources": [
-                {"kind": "param", "name": source.name}
-                if isinstance(source, ParamSource)
-                else {"kind": "run_type", "mapping": dict(source.mapping)}
-                for source in self.sources
-            ]
-        }
-        if not isinstance(self.default, ArgNotSet):
-            encoded["default"] = self.default
-        if self.translation is not None:
-            encoded["map"] = [list(pair) for pair in self.translation]
-        return encoded
-
-    def _translate(self, value: Any) -> Any:
-        if self.translation is None:
-            return value
-        return dict(self.translation).get(value, NOTSET)
+        return {"sources": [{"kind": "param", "name": self.name}]}
 
     def get_parse_time_value(self, field: str, dag: DAG | None) -> Any:
         """Return the value a run without conf gets, for code that reads the field during parsing."""
-        if not isinstance(self.default, ArgNotSet):
-            return self.default
-        for source in self.sources:
-            if isinstance(source, ParamSource) and dag is not None and source.name in dag.params:
-                value = self._translate(dag.params.get_param(source.name).value)
-                if _is_field_type(field, value):
-                    return value
+        if dag is not None and self.name in dag.params:
+            value = dag.params.get_param(self.name).value
+            if _is_usable(field, value):
+                return value
         return _FIELD_DEFAULTS[field]
 
     def validate_for(self, field: str, task_id: str, dag: DAG) -> None:
-        """Reject a lookup that can never resolve or that leaves the choice unbounded."""
-        where = f"{field!r} of task {task_id!r}"
-        if field not in LOOKUP_FIELDS:
-            raise ValueError(f"{where} cannot use a Lookup; only {sorted(LOOKUP_FIELDS)} can")
-        if not isinstance(self.default, ArgNotSet) and not _is_field_type(field, self.default):
-            raise ValueError(f"{where} has a Lookup default that is not a {LOOKUP_FIELDS[field].__name__}")
-        for source in self.sources:
-            if isinstance(source, ParamSource):
-                self._validate_param_source(source, field, where, dag)
-            else:
-                if isinstance(self.default, ArgNotSet):
-                    raise ValueError(f"{where} uses Lookup.run_type() without default=")
-                for _, value in source.mapping:
-                    if not _is_field_type(field, self._translate(value)):
-                        raise ValueError(f"{where} maps a run type to {value!r}, which is not valid here")
-
-    def _validate_param_source(self, source: ParamSource, field: str, where: str, dag: DAG) -> None:
-        if source.name not in dag.params:
-            raise ValueError(f"{where} looks up param {source.name!r}, which the Dag does not declare")
-        schema = dag.params.get_param(source.name).schema or {}
-        enum = schema.get("enum")
-        # Anyone who can trigger the Dag can set its params, so the author must list the choices.
-        if enum is not None:
-            choices = [self._translate(choice) for choice in enum]
-            if bad := [c for c, value in zip(enum, choices) if not _is_field_type(field, value)]:
-                raise ValueError(
-                    f"{where} looks up param {source.name!r}, whose choices {bad} are not valid here"
-                )
-        elif (
-            self.translation is None
-            and LOOKUP_FIELDS[field] is int
-            and "minimum" in schema
-            and "maximum" in schema
-        ):
-            if field == "pool_slots" and schema["minimum"] < 1:
-                raise ValueError(f"{where} looks up param {source.name!r}, whose minimum is below 1")
-        else:
-            bound = "enum, or minimum and maximum," if LOOKUP_FIELDS[field] is int else "enum"
+        """Reject a param that can never resolve or that leaves the choice unbounded."""
+        where = f"{field!r} of task {task_id!r} uses dag.param({self.name!r})"
+        if self.dag_id != dag.dag_id:
+            raise ValueError(f"{where} of Dag {self.dag_id!r}, but the task is in Dag {dag.dag_id!r}")
+        if self.name not in dag.params:
+            raise ValueError(f"{where}, which the Dag does not declare in params")
+        param = dag.params.get_param(self.name)
+        if not isinstance(self.declared_default, ArgNotSet) and param.value != self.declared_default:
+            # Every dag.param(name, default) call replaces the param's default for the whole Dag,
+            # and the scheduler only sees the last one.
             raise ValueError(
-                f"{where} looks up param {source.name!r}, which must declare {bound} "
+                f"{where} with default {self.declared_default!r}, but the param's default is now "
+                f"{param.value!r}; a run without conf would not get the default written here"
+            )
+        schema = param.schema or {}
+        is_int = LOOKUP_FIELDS[field] is int
+        choices = schema.get("enum")
+        if choices is None and not is_int and "const" in schema:
+            choices = [schema["const"]]
+        # Anyone who can trigger the Dag can set its params, so the author must list the choices.
+        if choices is not None:
+            if bad := [choice for choice in choices if not _is_usable(field, choice)]:
+                raise ValueError(f"{where}, whose choices {bad} are not valid here")
+        elif (
+            is_int
+            and schema.get("type") == "integer"
+            and _is_int(schema.get("minimum"))
+            and _is_int(schema.get("maximum"))
+        ):
+            if not _is_usable(field, schema["minimum"]):
+                raise ValueError(f"{where}, whose minimum is below 1")
+        else:
+            bound = "enum, or type 'integer' with minimum and maximum," if is_int else "enum or const"
+            raise ValueError(
+                f"{where}, which must declare {bound} "
                 "so that whoever triggers a run chooses among values the Dag author listed"
             )
 
 
-def reject_lookups_in_partial(partial_kwargs: Mapping[str, Any], task_id: str) -> None:
-    """Lookups on mapped tasks are not part of this proof of concept; overrides still reach them."""
-    if fields := sorted(k for k in LOOKUP_FIELDS if isinstance(partial_kwargs.get(k), Lookup)):
+@attrs.frozen
+class RunTypeLookup:
+    """What ``by_run_type()`` returns: the value for each listed run type, and for all the others."""
+
+    mapping: tuple[tuple[str, Any], ...]
+    default: Any
+
+    def serialize(self) -> dict[str, Any]:
+        """Encode for the serialized Dag; ``airflow.serialization.definitions.lookup`` decodes it."""
+        return {"sources": [{"kind": "run_type", "mapping": dict(self.mapping)}], "default": self.default}
+
+    def get_parse_time_value(self, field: str, dag: DAG | None) -> Any:
+        return self.default
+
+    def validate_for(self, field: str, task_id: str, dag: DAG | None = None) -> None:
+        where = f"{field!r} of task {task_id!r} uses by_run_type()"
+        if not _is_usable(field, self.default):
+            raise ValueError(f"{where} with default {self.default!r}, which is not valid here")
+        if bad := {run_type: value for run_type, value in self.mapping if not _is_usable(field, value)}:
+            raise ValueError(f"{where} with {bad}, which is not valid here")
+
+
+def by_run_type(*, default: Any, **values: Any) -> RunTypeLookup:
+    """
+    Choose a task's ``pool``, ``pool_slots``, ``priority_weight`` or ``queue`` by the type of the run.
+
+    .. code-block:: python
+
+        MergeOperator(task_id="merge", pool=by_run_type(backfill="backfill_pool", default="etl_pool"))
+
+    Reading the field while the Dag is parsed returns ``default``, so ``task_policy`` keeps seeing
+    a plain value.
+
+    :param values: the value for a run type, keyed by ``backfill``, ``scheduled``, ``manual``,
+        ``operator_triggered``, ``asset_triggered`` or ``asset_materialization``.
+    :param default: the value for every run type not in ``values``.
+    """
+    if not values:
+        raise ValueError("by_run_type() needs at least one run type")
+    if unknown := set(values) - _RUN_TYPES:
         raise ValueError(
-            f"Task {task_id!r} uses a Lookup for {fields} in partial(), which is not supported yet"
+            f"by_run_type() got unknown run types {sorted(unknown)}; expected some of {sorted(_RUN_TYPES)}"
         )
+    return RunTypeLookup(mapping=tuple(values.items()), default=default)
+
+
+def as_lookup(value: Any) -> ParamLookup | RunTypeLookup | None:
+    """Return the lookup that a scheduling field's argument stands for, if it is one."""
+    if isinstance(value, DagParam):
+        return ParamLookup.from_dag_param(value)
+    if isinstance(value, RunTypeLookup):
+        return value
+    return None
+
+
+def split_lookup(field: str, value: Any, task_id: str) -> tuple[ParamLookup | RunTypeLookup | None, Any]:
+    """
+    Split a scheduling field's argument into its lookup, if it is one, and its parse-time value.
+
+    A ``by_run_type()`` value is checked here. A ``dag.param()`` is checked in ``DAG.validate()``,
+    once every param of the Dag is declared.
+    """
+    lookup = as_lookup(value)
+    if lookup is None:
+        return None, value
+    if isinstance(lookup, RunTypeLookup):
+        lookup.validate_for(field, task_id)
+    dag = value.current_dag if isinstance(value, DagParam) else None
+    return lookup, lookup.get_parse_time_value(field, dag)
+
+
+def take_lookups(kwargs: MutableMapping[str, Any], task_id: str) -> dict[str, ParamLookup | RunTypeLookup]:
+    """Replace the lookups among the scheduling fields of ``kwargs`` with their parse-time values."""
+    lookups = {}
+    for field in LOOKUP_FIELDS:
+        lookup, plain = split_lookup(field, kwargs.get(field), task_id)
+        if lookup is not None:
+            lookups[field] = lookup
+            kwargs[field] = plain
+    return lookups
+
+
+def deepcopy_default_args(default_args: Any) -> Any:
+    """
+    Deep-copy a TaskGroup's ``default_args`` without copying a ``dag.param()`` on a scheduling field.
+
+    A ``DagParam`` holds its Dag, so copying it would copy the whole Dag and every task in it.
+    """
+    memo = {}
+    if isinstance(default_args, Mapping):
+        memo = {
+            id(value): value
+            for field in LOOKUP_FIELDS
+            if isinstance(value := default_args.get(field), DagParam)
+        }
+    return copy.deepcopy(default_args, memo)

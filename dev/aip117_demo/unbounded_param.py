@@ -21,7 +21,7 @@ from __future__ import annotations
 import datetime
 
 from airflow.providers.standard.operators.bash import BashOperator
-from airflow.sdk import DAG, Lookup, Param
+from airflow.sdk import DAG, Param
 
 with DAG(
     "aip117_unbounded_param",
@@ -29,5 +29,5 @@ with DAG(
     start_date=datetime.datetime(2026, 1, 1),
     params={"pool": Param("wh_small", type="string")},
     tags=["aip-117"],
-):
-    BashOperator(task_id="t", bash_command="true", pool=Lookup.param("pool"))
+) as dag:
+    BashOperator(task_id="t", bash_command="true", pool=dag.param("pool"))
