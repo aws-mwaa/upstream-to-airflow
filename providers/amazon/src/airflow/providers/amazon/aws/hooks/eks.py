@@ -28,11 +28,15 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from enum import Enum
 from functools import partial
+from typing import TYPE_CHECKING
 
 from botocore.exceptions import ClientError
 
 from airflow.providers.amazon.aws.hooks.base_aws import AwsBaseHook
 from airflow.utils import yaml
+
+if TYPE_CHECKING:
+    import boto3
 
 DEFAULT_PAGINATION_TOKEN = ""
 AUTHENTICATION_API_VERSION = "client.authentication.k8s.io/v1"
@@ -607,6 +611,18 @@ class EksHook(AwsBaseHook):
                 with contextlib.suppress(OSError):
                     os.unlink(temp_path)
 
+    def _get_sts_endpoint_url(self, session: boto3.Session) -> str:
+        """Return the STS endpoint that EKS tokens for this connection are signed for."""
+        sts_client = session.client(
+            "sts",
+            # sts_connection_assume skips the connection-wide endpoint_url, which on an EKS connection is
+            # an EKS endpoint, and EKS rejects tokens signed for a non-STS host.
+            endpoint_url=self.conn_config.get_service_endpoint_url("sts", sts_connection_assume=True),
+            config=self.config,
+            verify=self.verify,
+        )
+        return sts_client.meta.endpoint_url
+
     @contextmanager
     def generate_config_file_with_credentials(
         self, eks_cluster_name: str, pod_namespace: str | None
@@ -672,15 +688,7 @@ class EksHook(AwsBaseHook):
         # us-east-1, so force the regional endpoint on this session even if the user configured "legacy".
         # Not through the environment variable: the environment is shared by every trigger in the triggerer.
         session._session.set_config_variable("sts_regional_endpoints", "regional")
-        sts_client = session.client(
-            "sts",
-            # sts_connection_assume skips the connection-wide endpoint_url, which on an EKS connection is
-            # an EKS endpoint, and EKS rejects tokens signed for a non-STS host.
-            endpoint_url=self.conn_config.get_service_endpoint_url("sts", sts_connection_assume=True),
-            config=self.config,
-            verify=self.verify,
-        )
-        sts_url = f"{sts_client.meta.endpoint_url}/?Action=GetCallerIdentity&Version=2011-06-15"
+        sts_url = f"{self._get_sts_endpoint_url(session)}/?Action=GetCallerIdentity&Version=2011-06-15"
 
         cluster_config = {
             "apiVersion": "v1",

@@ -363,9 +363,11 @@ The precedence rules are as follows:
 
   1. ``endpoint_url`` specified per service level.
   2. ``endpoint_url`` specified in root level of connection extra. Please note that the **sts** clients
-     used for assume role, for test connection, and by
+     used for assume role, for test connection, by
      :class:`~airflow.providers.amazon.aws.hooks.eks.EksHook` to build the kubeconfig for
-     :class:`~airflow.providers.amazon.aws.operators.eks.EksPodOperator` do not use the global parameter.
+     :class:`~airflow.providers.amazon.aws.operators.eks.EksPodOperator`, and by the
+     :doc:`EKS executor <../executors/eks-executor>` to sign its cluster tokens do not use the global
+     parameter.
   3. Default ``botocore``/``boto3`` behaviour
 
 

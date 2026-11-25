@@ -69,7 +69,6 @@ def eks_config():
 def mock_aws():
     with (
         mock.patch.object(_client_factory, "_EksExecutorHook") as eks_hook_cls,
-        mock.patch.object(_client_factory, "StsHook") as sts_hook_cls,
         mock.patch.object(_client_factory, "fetch_access_token_for_cluster", autospec=True) as fetch_token,
     ):
         eks_hook = eks_hook_cls.return_value
@@ -81,7 +80,7 @@ def mock_aws():
             }
         }
         eks_hook.get_session.return_value.region_name = "us-east-1"
-        sts_hook_cls.return_value.conn_client_meta.endpoint_url = "https://sts.us-east-1.amazonaws.com"
+        eks_hook._get_sts_endpoint_url.return_value = "https://sts.us-east-1.amazonaws.com"
         fetch_token.return_value = "k8s-aws-v1.token"
         yield {"eks_hook_cls": eks_hook_cls, "eks_hook": eks_hook, "fetch_token": fetch_token}
 

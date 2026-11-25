@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 import signal
 import tempfile
@@ -68,7 +69,6 @@ def mock_aws():
     with (
         conf_vars({("aws_eks_executor", "cluster_name"): CLUSTER_NAME}),
         mock.patch.object(_client_factory, "_EksExecutorHook") as eks_hook_cls,
-        mock.patch.object(_client_factory, "StsHook") as sts_hook_cls,
         mock.patch.object(_client_factory, "fetch_access_token_for_cluster", autospec=True) as fetch_token,
     ):
         eks_hook = eks_hook_cls.return_value
@@ -80,12 +80,11 @@ def mock_aws():
             }
         }
         eks_hook.get_session.return_value.region_name = "us-east-1"
-        sts_hook_cls.return_value.conn_client_meta.endpoint_url = "https://sts.us-east-1.amazonaws.com"
+        eks_hook._get_sts_endpoint_url.return_value = "https://sts.us-east-1.amazonaws.com"
         fetch_token.return_value = "k8s-aws-v1.token-1"
         yield {
             "eks_hook_cls": eks_hook_cls,
             "eks_hook": eks_hook,
-            "sts_hook_cls": sts_hook_cls,
             "fetch_token": fetch_token,
         }
 
@@ -232,10 +231,9 @@ async def test_builds_client_for_the_teams_cluster(_, mock_aws, monkeypatch, fac
 @pytest.mark.asyncio
 @mock.patch.object(_client_factory, "_write_cluster_ca_file", autospec=True, return_value=None)
 @mock.patch.object(_client_factory, "fetch_access_token_for_cluster", autospec=True, return_value="token")
-@mock.patch.object(_client_factory, "StsHook", autospec=True)
 @mock.patch("botocore.client.BaseClient._make_api_call", autospec=True)
 async def test_describe_cluster_user_agent_names_the_executor(
-    mock_api_call, mock_sts_hook, _fetch_token, _write_ca_file, monkeypatch, factory
+    mock_api_call, _fetch_token, _write_ca_file, monkeypatch, factory
 ):
     monkeypatch.setenv("AIRFLOW__AWS_EKS_EXECUTOR__CLUSTER_NAME", CLUSTER_NAME)
     monkeypatch.setenv("AIRFLOW__AWS_EKS_EXECUTOR__REGION_NAME", "us-east-1")
@@ -247,7 +245,6 @@ async def test_describe_cluster_user_agent_names_the_executor(
             "certificateAuthority": {"data": b64encode(CA_PEM).decode()},
         }
     }
-    mock_sts_hook.return_value.conn_client_meta.endpoint_url = "https://sts.us-east-1.amazonaws.com"
 
     core_v1 = factory()
 
@@ -256,6 +253,31 @@ async def test_describe_cluster_user_agent_names_the_executor(
     assert "Caller/AwsEksExecutor" in eks_client.meta.config.user_agent_extra.split(" ")
     if inspect.iscoroutinefunction(core_v1.api_client.close):
         await core_v1.api_client.close()
+
+
+@mock.patch.object(_client_factory, "fetch_access_token_for_cluster", autospec=True, return_value="token")
+@mock.patch("botocore.client.BaseClient._make_api_call", autospec=True)
+def test_sts_url_ignores_connection_wide_endpoint_url(mock_api_call, mock_fetch_token, monkeypatch):
+    monkeypatch.setenv("AIRFLOW__AWS_EKS_EXECUTOR__CLUSTER_NAME", CLUSTER_NAME)
+    monkeypatch.setenv("AIRFLOW__AWS_EKS_EXECUTOR__REGION_NAME", "us-west-2")
+    monkeypatch.setenv(
+        "AIRFLOW_CONN_AWS_DEFAULT",
+        json.dumps(
+            {"conn_type": "aws", "extra": {"endpoint_url": "https://fips.eks.us-west-2.amazonaws.com"}}
+        ),
+    )
+    mock_api_call.return_value = {
+        "cluster": {
+            "status": "ACTIVE",
+            "endpoint": CLUSTER_ENDPOINT,
+            "certificateAuthority": {"data": b64encode(CA_PEM).decode()},
+        }
+    }
+
+    _get_eks_kube_client()
+
+    sts_url = "https://sts.us-west-2.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15"
+    assert mock_fetch_token.call_args.args[1] == sts_url
 
 
 @pytest.mark.asyncio
@@ -289,11 +311,8 @@ def _signing_key_id(configuration: client.Configuration) -> str:
 
 
 @mock.patch.object(_client_factory, "time", autospec=True)
-@mock.patch.object(_client_factory, "StsHook", autospec=True)
 @mock.patch("botocore.client.BaseClient._make_api_call", autospec=True)
-def test_new_token_is_signed_with_rotated_credentials(
-    mock_api_call, mock_sts_hook, mock_time, tmp_path, monkeypatch
-):
+def test_new_token_is_signed_with_rotated_credentials(mock_api_call, mock_time, tmp_path, monkeypatch):
     """Static keys in a credentials file that is rewritten while the executor runs."""
     credentials_file = tmp_path / "credentials"
 
@@ -317,7 +336,6 @@ def test_new_token_is_signed_with_rotated_credentials(
             "certificateAuthority": {"data": b64encode(CA_PEM).decode()},
         }
     }
-    mock_sts_hook.return_value.conn_client_meta.endpoint_url = "https://sts.us-east-1.amazonaws.com"
     mock_time.monotonic.return_value = 1000.0
     write_keys("AKIAFIRSTKEY")
     configuration = _get_eks_kube_client().api_client.configuration

@@ -45,7 +45,6 @@ from airflow.providers.amazon.aws.executors.eks.utils import (
     get_cluster_name_env_var,
 )
 from airflow.providers.amazon.aws.hooks.eks import EksHook
-from airflow.providers.amazon.aws.hooks.sts import StsHook
 from airflow.providers.amazon.aws.utils.eks_get_token import (
     TOKEN_EXPIRATION_MINUTES,
     fetch_access_token_for_cluster,
@@ -182,8 +181,7 @@ def _configure_eks_auth(
     session = eks_hook.get_session()
 
     # EKS needs the regional STS endpoint, which botocore uses by default since 1.40.
-    sts_endpoint = StsHook(aws_conn_id=conn_id, region_name=session.region_name).conn_client_meta.endpoint_url
-    sts_url = f"{sts_endpoint}/?Action=GetCallerIdentity&Version=2011-06-15"
+    sts_url = f"{eks_hook._get_sts_endpoint_url(session)}/?Action=GetCallerIdentity&Version=2011-06-15"
 
     configuration.host = cluster["endpoint"]
     configuration.ssl_ca_cert = _write_cluster_ca_file(cluster["certificateAuthority"]["data"])
